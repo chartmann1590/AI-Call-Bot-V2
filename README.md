@@ -69,7 +69,7 @@ CallBot integrates multiple technologies to create a seamless AI phone experienc
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/chartmann1590/AI-Call-Bot-V2.git
    cd A-Call-Bot-V2
    ```
 
@@ -319,8 +319,8 @@ We welcome contributions to CallBot! Please see our [Contributing Guide](docs/co
 
 ```bash
 # Clone and setup development environment
-git clone https://github.com/your-org/callbot.git
-cd callbot
+git clone https://github.com/chartmann1590/AI-Call-Bot-V2.git
+cd A-Call-Bot-V2
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -373,8 +373,8 @@ Comprehensive documentation is available in the [docs/](docs/) directory:
 For issues and questions:
 
 - **Documentation**: Check the [docs/](docs/) directory
-- **Bug Reports**: Use the [GitHub issue tracker](https://github.com/your-org/callbot/issues)
-- **Feature Requests**: Submit via [GitHub issues](https://github.com/your-org/callbot/issues)
+- **Bug Reports**: Use the [GitHub issue tracker](https://github.com/chartmann1590/AI-Call-Bot-V2/issues)
+- **Feature Requests**: Submit via [GitHub issues](https://github.com/chartmann1590/AI-Call-Bot-V2/issues)
 - **Security Issues**: Email security@callbot.com (if applicable)
 - **Community**: Join our [Discord server](https://discord.gg/callbot) (if applicable)
 
