@@ -40,6 +40,24 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to determine docker compose command
+get_docker_compose_cmd() {
+    if command_exists "docker"; then
+        # Check if docker compose (V2) is available
+        if docker compose version >/dev/null 2>&1; then
+            echo "docker compose"
+        elif command_exists "docker-compose"; then
+            echo "docker-compose"
+        else
+            print_error "Neither 'docker compose' nor 'docker-compose' is available"
+            exit 1
+        fi
+    else
+        print_error "Docker is not installed"
+        exit 1
+    fi
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_status "Checking prerequisites..."
@@ -50,9 +68,9 @@ check_prerequisites() {
         missing_deps+=("docker")
     fi
     
-    if ! command_exists docker-compose; then
-        missing_deps+=("docker-compose")
-    fi
+    # Check for either docker-compose or docker compose
+    DOCKER_COMPOSE_CMD=$(get_docker_compose_cmd)
+    print_status "Using Docker Compose command: $DOCKER_COMPOSE_CMD"
     
     if ! command_exists openssl; then
         missing_deps+=("openssl")
@@ -309,14 +327,14 @@ deploy_application() {
     
     # Stop existing containers
     print_status "Stopping existing containers..."
-    docker-compose -f docker-compose.prod.yml down || true
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
     
     # Build and start the application
     print_status "Building Docker images..."
-    docker-compose -f docker-compose.prod.yml build --no-cache
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache
     
     print_status "Starting services..."
-    docker-compose -f docker-compose.prod.yml up -d
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
     
     # Wait for services to be ready
     print_status "Waiting for services to be ready..."
@@ -324,7 +342,7 @@ deploy_application() {
     
     # Check if services are running
     print_status "Checking service status..."
-    docker-compose -f docker-compose.prod.yml ps
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
     
     print_success "Application deployed successfully!"
 }
@@ -351,9 +369,9 @@ show_deployment_info() {
     echo "  - Valid for: $CERT_VALIDITY_DAYS days"
     echo
     echo "Useful commands:"
-    echo "  - View logs: docker-compose -f docker-compose.prod.yml logs -f"
-    echo "  - Stop services: docker-compose -f docker-compose.prod.yml down"
-    echo "  - Restart services: docker-compose -f docker-compose.prod.yml restart"
+    echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs -f"
+    echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down"
+    echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml restart"
     echo
     print_warning "Note: This uses a self-signed certificate. Browsers will show a security warning."
     print_warning "For production, replace with a proper SSL certificate from a trusted CA."
