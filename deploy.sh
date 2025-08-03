@@ -58,6 +58,30 @@ get_docker_compose_cmd() {
     fi
 }
 
+# Check Docker daemon settings
+check_docker_settings() {
+    print_status "Checking Docker daemon settings..."
+    
+    # Check if BuildKit is available
+    if docker info | grep -q "BuildKit"; then
+        print_success "BuildKit is available for optimized builds"
+    else
+        print_warning "BuildKit not detected - builds may use more disk space"
+    fi
+    
+    # Check Docker daemon memory (if on macOS)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        print_status "On macOS - consider increasing Docker Desktop memory to 8GB+"
+        print_status "Go to Docker Desktop > Settings > Resources > Advanced"
+    fi
+    
+    # Check available Docker disk space
+    local docker_space=$(docker system df | grep "Total Space" | awk '{print $3}')
+    if [ -n "$docker_space" ]; then
+        print_status "Docker disk usage: $docker_space"
+    fi
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_status "Checking prerequisites..."
@@ -83,6 +107,9 @@ check_prerequisites() {
     fi
     
     print_success "All prerequisites are installed"
+    
+    # Check Docker settings
+    check_docker_settings
 }
 
 # Pull latest changes from git
@@ -338,17 +365,139 @@ EOF
     print_success "Production docker-compose configuration created"
 }
 
+# Clean Docker system to free up space
+clean_docker_system() {
+    print_status "Cleaning Docker system to free up disk space..."
+    
+    # Clean up unused containers, networks, and images
+    docker system prune -f || true
+    
+    # Clean up build cache
+    docker builder prune -f || true
+    
+    # Clean up unused volumes (be careful with this in production)
+    docker volume prune -f || true
+    
+    print_success "Docker system cleaned"
+}
+
+# Check available disk space
+check_disk_space() {
+    print_status "Checking available disk space..."
+    
+    # Get available disk space in GB
+    local available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    
+    if [ "$available_space" -lt 5 ]; then
+        print_warning "Low disk space detected: ${available_space}GB available"
+        print_warning "Consider freeing up disk space before continuing"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Deployment cancelled by user"
+            exit 1
+        fi
+    else
+        print_success "Sufficient disk space available: ${available_space}GB"
+    fi
+}
+
+# Show troubleshooting information
+show_troubleshooting_info() {
+    echo
+    echo "=========================================="
+    echo "         TROUBLESHOOTING GUIDE"
+    echo "=========================================="
+    echo
+    echo "If Docker build fails with 'No space left on device':"
+    echo
+    echo "1. Clean Docker system:"
+    echo "   docker system prune -f"
+    echo "   docker builder prune -f"
+    echo
+    echo "2. Check disk space:"
+    echo "   df -h /"
+    echo
+    echo "3. Free up disk space:"
+    echo "   - Remove old Docker images: docker image prune -a"
+    echo "   - Remove unused volumes: docker volume prune"
+    echo "   - Clean system cache: sudo apt-get clean (Ubuntu/Debian)"
+    echo
+    echo "4. Increase Docker Desktop resources (macOS):"
+    echo "   - Go to Docker Desktop > Settings > Resources"
+    echo "   - Increase memory limit to 8GB+"
+    echo "   - Increase disk image size"
+    echo
+    echo "5. Use optimized Dockerfile:"
+    echo "   - The Dockerfile has been optimized with --no-install-recommends"
+    echo "   - Consider using multi-stage builds for complex applications"
+    echo
+    echo "6. Alternative build commands:"
+    echo "   - Build with no cache: docker build --no-cache ."
+    echo "   - Build with BuildKit: DOCKER_BUILDKIT=1 docker build ."
+    echo
+}
+
+# Build Docker images with retry logic
+build_with_retry() {
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        print_status "Build attempt $attempt of $max_attempts..."
+        
+        if docker info | grep -q "BuildKit"; then
+            print_status "Using BuildKit for optimized builds..."
+            export DOCKER_BUILDKIT=1
+            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
+                print_success "Build completed successfully on attempt $attempt"
+                return 0
+            fi
+        else
+            print_status "Using standard Docker build..."
+            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache; then
+                print_success "Build completed successfully on attempt $attempt"
+                return 0
+            fi
+        fi
+        
+        print_warning "Build attempt $attempt failed"
+        
+        if [ $attempt -lt $max_attempts ]; then
+            print_status "Cleaning Docker system and retrying..."
+            clean_docker_system
+            sleep 10
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    print_error "All build attempts failed"
+    return 1
+}
+
 # Build and deploy the application
 deploy_application() {
     print_status "Building and deploying the application..."
+    
+    # Check disk space first
+    check_disk_space
+    
+    # Clean Docker system to free up space
+    clean_docker_system
     
     # Stop existing containers
     print_status "Stopping existing containers..."
     $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
     
-    # Build and start the application
-    print_status "Building Docker images..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache
+    # Build and start the application with retry logic
+    print_status "Building Docker images with optimized settings..."
+    
+    if ! build_with_retry; then
+        print_error "Failed to build Docker images after multiple attempts"
+        print_error "Please check disk space and Docker configuration"
+        exit 1
+    fi
     
     print_status "Starting services..."
     $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
@@ -418,7 +567,11 @@ main() {
     update_docker_compose
     
     # Deploy the application
-    deploy_application
+    if ! deploy_application; then
+        print_error "Deployment failed!"
+        show_troubleshooting_info
+        exit 1
+    fi
     
     # Show deployment information
     show_deployment_info
