@@ -41,7 +41,7 @@ A-Call-Bot-V2/
 ├── start.sh             # Easy startup script
 ├── env.example          # Environment configuration
 ├── .gitignore           # Git ignore rules
-└── STRUCTURE_CHANGES.md # Directory reorganization notes
+└── docs/structure-changes.md # Directory reorganization notes
 ```
 
 ## ✅ What Was Accomplished
