@@ -65,7 +65,33 @@ CallBot integrates multiple technologies to create a seamless AI phone experienc
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Production Deployment (Recommended)
+
+For production deployment with SSL encryption:
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/chartmann1590/AI-Call-Bot-V2.git
+   cd A-Call-Bot-V2
+   ```
+
+2. **Run the deployment script**:
+   ```bash
+   ./deploy.sh
+   ```
+
+3. **Access the application**:
+   - HTTPS: https://localhost (with SSL)
+   - HTTP: http://localhost (redirects to HTTPS)
+
+The deployment script automatically:
+- Pulls latest changes from git
+- Generates self-signed SSL certificates
+- Configures nginx with SSL
+- Builds and deploys Docker containers
+- Starts all services
+
+### Development Setup
 
 1. **Clone the repository**:
    ```bash
@@ -75,7 +101,7 @@ CallBot integrates multiple technologies to create a seamless AI phone experienc
 
 2. **Configure environment variables**:
    ```bash
-   cp .env.example .env
+   cp docs/env.production.example .env
    # Edit .env with your settings
    ```
 
@@ -352,10 +378,58 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 For full license terms, see [LICENSE](LICENSE).
 
+## Deployment Scripts
+
+The project includes several scripts for easy deployment and management:
+
+### Production Deployment
+- **`deploy.sh`**: Complete production deployment with SSL
+  - Pulls latest git changes
+  - Generates self-signed SSL certificates
+  - Configures nginx with SSL encryption
+  - Builds and deploys Docker containers
+  - Starts all services
+
+### Health Monitoring
+- **`health_check.sh`**: Verifies deployment health
+  - Checks container status
+  - Validates SSL certificates
+  - Tests web interface accessibility
+  - Monitors resource usage
+  - Reports any errors
+
+### Backup and Recovery
+- **`backup.sh`**: Creates application backups
+  - Backs up Docker volumes
+  - Archives configuration files
+  - Creates backup manifests
+  - Automatically cleans old backups
+
+### Usage Examples
+```bash
+# Deploy to production
+./deploy.sh
+
+# Check system health
+./health_check.sh
+
+# Create backup
+./backup.sh
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f
+
+# Stop services
+docker-compose -f docker-compose.prod.yml down
+```
+
+For detailed deployment instructions, see [docs/deployment.md](docs/deployment.md).
+
 ## Documentation
 
 Comprehensive documentation is available in the [docs/](docs/) directory:
 
+- **[Deployment Guide](docs/deployment.md)** - Complete deployment instructions
 - **[Installation Guide](docs/installation.md)** - Complete setup instructions
 - **[Security Guide](docs/security.md)** - Security best practices
 - **[API Reference](docs/api-reference.md)** - REST API documentation
