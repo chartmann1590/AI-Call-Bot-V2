@@ -1,0 +1,365 @@
+{% extends "layout.html" %}
+
+{% block title %}CallBot - Settings{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="fas fa-cog me-2"></i>Settings</h1>
+        <p class="text-muted">Configure CallBot's SIP, AI, and TTS settings.</p>
+    </div>
+</div>
+
+<form method="POST" action="{{ url_for('settings') }}">
+    <div class="row">
+        <!-- SIP Configuration -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-phone me-2"></i>SIP Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="sip_domain" class="form-label">SIP Domain</label>
+                        <input type="text" class="form-control" id="sip_domain" name="sip_domain" 
+                               value="{{ settings.sip_domain }}" required>
+                        <div class="form-text">Your SIP server domain (e.g., pbx.example.com)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="sip_username" class="form-label">SIP Username</label>
+                        <input type="text" class="form-control" id="sip_username" name="sip_username" 
+                               value="{{ settings.sip_username }}" required>
+                        <div class="form-text">Your SIP extension username</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="sip_password" class="form-label">SIP Password</label>
+                        <input type="password" class="form-control" id="sip_password" name="sip_password" 
+                               value="{{ settings.sip_password }}" required>
+                        <div class="form-text">Your SIP extension password</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="sip_port" class="form-label">SIP Port</label>
+                        <input type="number" class="form-control" id="sip_port" name="sip_port" 
+                               value="{{ settings.sip_port }}" min="1" max="65535" required>
+                        <div class="form-text">SIP server port (usually 5060)</div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline-primary" onclick="testSIPConnection()">
+                        <i class="fas fa-phone me-1"></i>Test SIP Connection
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Configuration -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-brain me-2"></i>AI Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="ollama_url" class="form-label">Ollama Server URL</label>
+                        <input type="url" class="form-control" id="ollama_url" name="ollama_url" 
+                               value="{{ settings.ollama_url }}" required>
+                        <div class="form-text">Ollama server URL (e.g., http://localhost:11434)</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ollama_model" class="form-label">Ollama Model</label>
+                        <select class="form-select" id="ollama_model" name="ollama_model" required>
+                            <option value="">Select a model...</option>
+                            {% for model in ollama_models %}
+                                <option value="{{ model }}" {{ 'selected' if model == settings.ollama_model }}>
+                                    {{ model }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">AI model to use for generating responses</div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline-success" onclick="testOllamaConnection()">
+                        <i class="fas fa-brain me-1"></i>Test AI Connection
+                    </button>
+                    
+                    <div id="ollama-status" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- TTS Configuration -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-volume-up me-2"></i>Text-to-Speech Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="tts_engine" class="form-label">TTS Engine</label>
+                        <select class="form-select" id="tts_engine" name="tts_engine" required onchange="updateTTSVoices()">
+                            <option value="">Select TTS engine...</option>
+                            {% for engine_name, engine_info in tts_engines.items() %}
+                                <option value="{{ engine_name }}" 
+                                        {{ 'selected' if engine_name == settings.tts_engine }}
+                                        data-available="{{ 'true' if engine_info.available else 'false' }}">
+                                    {{ engine_info.name }} {{ '(Not Available)' if not engine_info.available }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Text-to-speech engine to use</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="tts_voice" class="form-label">TTS Voice</label>
+                        <select class="form-select" id="tts_voice" name="tts_voice" required>
+                            <option value="">Select a voice...</option>
+                        </select>
+                        <div class="form-text">Voice to use for speech synthesis</div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline-info" onclick="testTTS()">
+                        <i class="fas fa-volume-up me-1"></i>Test TTS
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Whisper Configuration -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-microphone me-2"></i>Speech Recognition Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="whisper_model_size" class="form-label">Whisper Model Size</label>
+                        <select class="form-select" id="whisper_model_size" name="whisper_model_size" required>
+                            <option value="tiny" {{ 'selected' if settings.whisper_model_size == 'tiny' }}>Tiny (Fastest)</option>
+                            <option value="base" {{ 'selected' if settings.whisper_model_size == 'base' }}>Base (Balanced)</option>
+                            <option value="small" {{ 'selected' if settings.whisper_model_size == 'small' }}>Small (Better)</option>
+                            <option value="medium" {{ 'selected' if settings.whisper_model_size == 'medium' }}>Medium (Best)</option>
+                            <option value="large" {{ 'selected' if settings.whisper_model_size == 'large' }}>Large (Best Quality)</option>
+                        </select>
+                        <div class="form-text">Larger models are more accurate but slower</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="whisper_device" class="form-label">Whisper Device</label>
+                        <select class="form-select" id="whisper_device" name="whisper_device" required>
+                            <option value="cpu" {{ 'selected' if settings.whisper_device == 'cpu' }}>CPU</option>
+                            <option value="cuda" {{ 'selected' if settings.whisper_device == 'cuda' }}>CUDA (GPU)</option>
+                        </select>
+                        <div class="form-text">Device to use for speech recognition</div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-outline-warning" onclick="testWhisper()">
+                        <i class="fas fa-microphone me-1"></i>Test Whisper
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Button -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="mb-0">Save Configuration</h6>
+                            <small class="text-muted">Click save to apply all settings</small>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-1"></i>Save Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Test Results Modal -->
+<div class="modal fade" id="testResultsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Test Results</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="testResultsContent">
+                <!-- Content will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// TTS engine voices mapping
+const ttsVoices = {
+    {% for engine_name, engine_info in tts_engines.items() %}
+        '{{ engine_name }}': {{ engine_info.voices | tojson }},
+    {% endfor %}
+};
+
+// Initialize TTS voices on page load
+$(document).ready(function() {
+    updateTTSVoices();
+});
+
+function updateTTSVoices() {
+    const selectedEngine = $('#tts_engine').val();
+    const voiceSelect = $('#tts_voice');
+    const currentVoice = '{{ settings.tts_voice }}';
+    
+    // Clear current options
+    voiceSelect.empty();
+    voiceSelect.append('<option value="">Select a voice...</option>');
+    
+    if (selectedEngine && ttsVoices[selectedEngine]) {
+        ttsVoices[selectedEngine].forEach(voice => {
+            const option = $('<option></option>')
+                .val(voice)
+                .text(voice)
+                .prop('selected', voice === currentVoice);
+            voiceSelect.append(option);
+        });
+    }
+}
+
+function testOllamaConnection() {
+    const url = $('#ollama_url').val();
+    const model = $('#ollama_model').val();
+    
+    if (!url || !model) {
+        alert('Please enter both Ollama URL and model');
+        return;
+    }
+    
+    $('#ollama-status').html('<div class="spinner-border spinner-border-sm text-primary"></div> Testing connection...');
+    
+    $.get('/api/test_ollama')
+        .done(function(data) {
+            let statusHtml = '';
+            if (data.connected) {
+                statusHtml = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>Connection successful!
+                        <br><small>Available models: ${data.models.join(', ')}</small>
+                    </div>
+                `;
+            } else {
+                statusHtml = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-times-circle me-2"></i>Connection failed: ${data.error || 'Unknown error'}
+                    </div>
+                `;
+            }
+            $('#ollama-status').html(statusHtml);
+        })
+        .fail(function() {
+            $('#ollama-status').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>Failed to test connection
+                </div>
+            `);
+        });
+}
+
+function testSIPConnection() {
+    const domain = $('#sip_domain').val();
+    const username = $('#sip_username').val();
+    const password = $('#sip_password').val();
+    
+    if (!domain || !username || !password) {
+        alert('Please enter all SIP configuration fields');
+        return;
+    }
+    
+    // For now, just show a message since we can't test SIP without actual server
+    $('#testResultsContent').html(`
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>SIP connection testing requires a running SIP server.
+            <br><small>The connection will be tested when the application starts.</small>
+        </div>
+    `);
+    $('#testResultsModal').modal('show');
+}
+
+function testTTS() {
+    const engine = $('#tts_engine').val();
+    const voice = $('#tts_voice').val();
+    
+    if (!engine || !voice) {
+        alert('Please select both TTS engine and voice');
+        return;
+    }
+    
+    $('#testResultsContent').html(`
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>TTS testing will be available when the application is running.
+            <br><small>Engine: ${engine}, Voice: ${voice}</small>
+        </div>
+    `);
+    $('#testResultsModal').modal('show');
+}
+
+function testWhisper() {
+    const modelSize = $('#whisper_model_size').val();
+    const device = $('#whisper_device').val();
+    
+    if (!modelSize || !device) {
+        alert('Please select both Whisper model size and device');
+        return;
+    }
+    
+    $('#testResultsContent').html(`
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>Whisper testing will be available when the application is running.
+            <br><small>Model: ${modelSize}, Device: ${device}</small>
+        </div>
+    `);
+    $('#testResultsModal').modal('show');
+}
+
+// Auto-save form data to localStorage
+$('form input, form select').on('change', function() {
+    const formData = {};
+    $('form input, form select').each(function() {
+        formData[$(this).attr('name')] = $(this).val();
+    });
+    localStorage.setItem('callbot_settings', JSON.stringify(formData));
+});
+
+// Restore form data from localStorage
+$(document).ready(function() {
+    const savedData = localStorage.getItem('callbot_settings');
+    if (savedData) {
+        const formData = JSON.parse(savedData);
+        Object.keys(formData).forEach(key => {
+            $(`[name="${key}"]`).val(formData[key]);
+        });
+        updateTTSVoices();
+    }
+});
+</script>
+{% endblock %} 

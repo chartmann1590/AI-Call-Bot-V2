@@ -1,0 +1,248 @@
+{% extends "layout.html" %}
+
+{% block title %}CallBot - Home{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="jumbotron bg-light p-5 rounded">
+            <h1 class="display-4">
+                <i class="fas fa-robot text-primary me-3"></i>Welcome to CallBot
+            </h1>
+            <p class="lead">Your AI-powered phone assistant that automatically answers calls, transcribes speech, and responds intelligently.</p>
+            <hr class="my-4">
+            <p>CallBot integrates with your SIP phone system to provide a seamless AI calling experience.</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- System Status -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-phone-alt fa-3x text-primary mb-3"></i>
+                <h5 class="card-title">SIP Status</h5>
+                <p class="card-text" id="sip-status">Checking...</p>
+                <div class="spinner-border spinner-border-sm text-primary d-none" id="sip-spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ollama Status -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-brain fa-3x text-success mb-3"></i>
+                <h5 class="card-title">AI Status</h5>
+                <p class="card-text" id="ollama-status">Checking...</p>
+                <div class="spinner-border spinner-border-sm text-success d-none" id="ollama-spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Calls -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-comments fa-3x text-warning mb-3"></i>
+                <h5 class="card-title">Active Calls</h5>
+                <p class="card-text" id="active-calls">0</p>
+                <div class="spinner-border spinner-border-sm text-warning d-none" id="calls-spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Total Calls -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-line fa-3x text-info mb-3"></i>
+                <h5 class="card-title">Total Calls</h5>
+                <p class="card-text" id="total-calls">Loading...</p>
+                <div class="spinner-border spinner-border-sm text-info d-none" id="total-spinner"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- Quick Actions -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-bolt me-2"></i>Quick Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('conversations') }}" class="btn btn-outline-primary">
+                        <i class="fas fa-comments me-2"></i>View Conversations
+                    </a>
+                    <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-cog me-2"></i>Configure Settings
+                    </a>
+                    <button class="btn btn-outline-success" onclick="testOllama()">
+                        <i class="fas fa-brain me-2"></i>Test AI Connection
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-clock me-2"></i>Recent Activity
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="recent-activity">
+                    <div class="text-center">
+                        <div class="spinner-border spinner-border-sm text-primary"></div>
+                        <p class="text-muted mt-2">Loading recent activity...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Information -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>System Information
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Features</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-check text-success me-2"></i>Automatic call answering</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Real-time speech transcription</li>
+                            <li><i class="fas fa-check text-success me-2"></i>AI-powered responses</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Text-to-speech playback</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Technologies</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-code text-primary me-2"></i>Flask Web Framework</li>
+                            <li><i class="fas fa-code text-primary me-2"></i>PJSIP VoIP Library</li>
+                            <li><i class="fas fa-code text-primary me-2"></i>Faster Whisper Transcription</li>
+                            <li><i class="fas fa-code text-primary me-2"></i>Ollama AI Integration</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Update system status on page load
+$(document).ready(function() {
+    updateSystemStatus();
+    loadRecentActivity();
+    updateCallStats();
+    
+    // Refresh status every 30 seconds
+    setInterval(updateSystemStatus, 30000);
+    setInterval(updateCallStats, 10000);
+});
+
+function updateSystemStatus() {
+    // Test Ollama connection
+    $('#ollama-spinner').removeClass('d-none');
+    $.get('/api/test_ollama')
+        .done(function(data) {
+            if (data.connected) {
+                $('#ollama-status').html('<span class="text-success">Connected</span>');
+            } else {
+                $('#ollama-status').html('<span class="text-danger">Disconnected</span>');
+            }
+        })
+        .fail(function() {
+            $('#ollama-status').html('<span class="text-danger">Error</span>');
+        })
+        .always(function() {
+            $('#ollama-spinner').addClass('d-none');
+        });
+    
+    // Check active calls
+    $('#calls-spinner').removeClass('d-none');
+    $.get('/api/active_calls')
+        .done(function(data) {
+            const activeCount = Object.keys(data).length;
+            $('#active-calls').text(activeCount);
+        })
+        .fail(function() {
+            $('#active-calls').text('Error');
+        })
+        .always(function() {
+            $('#calls-spinner').addClass('d-none');
+        });
+}
+
+function loadRecentActivity() {
+    $.get('/api/calls?page=1&per_page=5')
+        .done(function(data) {
+            const activityHtml = data.calls.map(call => `
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <strong>${call.caller_id}</strong>
+                        <br><small class="text-muted">${new Date(call.timestamp).toLocaleString()}</small>
+                    </div>
+                    <span class="badge bg-${call.status === 'completed' ? 'success' : 'warning'}">${call.status}</span>
+                </div>
+            `).join('');
+            
+            $('#recent-activity').html(activityHtml || '<p class="text-muted">No recent activity</p>');
+        })
+        .fail(function() {
+            $('#recent-activity').html('<p class="text-danger">Failed to load activity</p>');
+        });
+}
+
+function updateCallStats() {
+    $('#total-spinner').removeClass('d-none');
+    $.get('/api/calls?page=1')
+        .done(function(data) {
+            $('#total-calls').text(data.total);
+        })
+        .fail(function() {
+            $('#total-calls').text('Error');
+        })
+        .always(function() {
+            $('#total-spinner').addClass('d-none');
+        });
+}
+
+function testOllama() {
+    $('#ollama-spinner').removeClass('d-none');
+    $.get('/api/test_ollama')
+        .done(function(data) {
+            if (data.connected) {
+                alert('AI connection successful! Available models: ' + data.models.join(', '));
+            } else {
+                alert('AI connection failed: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .fail(function() {
+            alert('Failed to test AI connection');
+        })
+        .always(function() {
+            $('#ollama-spinner').addClass('d-none');
+        });
+}
+</script>
+{% endblock %} 
