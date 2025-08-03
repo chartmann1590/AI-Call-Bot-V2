@@ -94,8 +94,25 @@ pull_latest_changes() {
         exit 1
     fi
     
-    git fetch origin
-    git reset --hard origin/main  # or origin/master depending on your default branch
+    # Stash any local changes to avoid conflicts
+    print_status "Stashing any local changes..."
+    git stash || true
+    
+    # Fetch all changes from remote
+    print_status "Fetching latest changes from remote..."
+    git fetch --all
+    
+    # Get the current branch name
+    CURRENT_BRANCH=$(git branch --show-current)
+    print_status "Current branch: $CURRENT_BRANCH"
+    
+    # Reset to match the remote branch exactly
+    print_status "Resetting to match remote branch..."
+    git reset --hard "origin/$CURRENT_BRANCH"
+    
+    # Clean any untracked files
+    print_status "Cleaning untracked files..."
+    git clean -fd
     
     print_success "Latest changes pulled successfully"
 }
