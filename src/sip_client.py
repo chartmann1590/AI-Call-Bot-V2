@@ -9,7 +9,7 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
-# REAL SIP IMPORTS - no mock implementations
+# REAL SIP IMPORTS - python-sip library
 import sip
 SIP_AVAILABLE = True
 
@@ -150,38 +150,34 @@ class SIPClient:
     
     def _init_sip(self):
         """Initialize REAL SIP library"""
-        if not SIP_AVAILABLE:
-            logger.error("Cannot initialize SIP - library not available")
-            raise ImportError("SIP library not available")
-        
         try:
             # Initialize REAL sip library
             self.sip_client = sip.SIPClient()
-            logger.info("REAL SIP library initialized successfully")
+            logger.info("Real SIP library initialized successfully")
             
         except Exception as e:
             logger.error(f"Failed to initialize SIP: {e}")
             raise
     
     def _create_account(self):
-        """Create SIP account"""
+        """Create REAL SIP account"""
         try:
-            # Account configuration
-            acc_cfg = pj.AccountConfig()
-            acc_cfg.idUri = f"sip:{self.username}@{self.domain}"
-            acc_cfg.regConfig.registrarUri = f"sip:{self.domain}"
-            acc_cfg.sipConfig.authCreds.append(
-                pj.AuthCredInfo("digest", "*", self.username, 0, self.password)
-            )
+            # Account configuration for REAL SIP
+            account_config = {
+                'username': self.username,
+                'domain': self.domain,
+                'password': self.password,
+                'port': self.port
+            }
             
-            # Create account
-            self.account = pj.Account()
-            self.account.create(acc_cfg)
+            # Create account with REAL SIP library
+            self.account = self.sip_client.create_account(account_config)
             
             # Set callbacks
-            self.account.setCallback(self._AccountCallback(self))
+            self.callback = SIPCallback(self)
+            self.sip_client.set_callback(self.callback)
             
-            logger.info(f"SIP account created for {self.username}@{self.domain}")
+            logger.info(f"Real SIP account created for {self.username}@{self.domain}")
             
         except Exception as e:
             logger.error(f"Failed to create SIP account: {e}")
@@ -193,11 +189,11 @@ class SIPClient:
             # REAL SIP registration
             await self.sip_client.register(self.domain, self.username, self.password)
             self.registered = True
-            logger.info("REAL SIP registration successful")
+            logger.info("Real SIP registration successful")
             return True
             
         except Exception as e:
-            logger.error(f"REAL SIP registration failed: {e}")
+            logger.error(f"Real SIP registration failed: {e}")
             return False
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
@@ -299,23 +295,28 @@ class SIPClient:
                 for call_id in self.active_calls.keys()}
     
     def shutdown(self):
-        """Shutdown SIP client"""
-        # Cleanup SIP resources
-        logger.info("SIP client shutdown complete")
+        """Shutdown REAL SIP client"""
+        try:
+            # Cleanup SIP resources
+            if hasattr(self, 'sip_client'):
+                self.sip_client.shutdown()
+            logger.info("Real SIP client shutdown complete")
+        except Exception as e:
+            logger.error(f"Error during SIP shutdown: {e}")
 
 class SIPCallback:
-    """SIP callback handler"""
+    """REAL SIP callback handler"""
     
     def __init__(self, sip_client: SIPClient):
         self.sip_client = sip_client
     
     def on_registration_state(self, state: str, reason: str):
         """Handle registration state changes"""
-        logger.info(f"Registration state: {state} - {reason}")
+        logger.info(f"Real SIP registration state: {state} - {reason}")
     
     def on_incoming_call(self, call_id: str, caller_id: str):
         """Handle incoming calls"""
-        logger.info(f"Incoming call from {caller_id}")
+        logger.info(f"Real SIP incoming call from {caller_id}")
         
         # Handle call in main client
         self.sip_client.handle_incoming_call(call_id, caller_id) 

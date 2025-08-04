@@ -3,7 +3,7 @@ Flask-SQLAlchemy==3.0.5
 Flask-Admin==1.6.1
 Werkzeug==2.3.7
 # REAL SIP LIBRARY - no mock implementations
-sip
+python-sip==0.1.0
 faster-whisper>=0.10.0
 requests==2.31.0
 python-dotenv==1.0.0
