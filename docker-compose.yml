@@ -15,8 +15,9 @@ services:
       - SIP_DOMAIN=pbx.example.com
       - SIP_USERNAME=1001
       - SIP_PASSWORD=password
-      - OLLAMA_URL=http://ollama:11434
-      - OLLAMA_MODEL=llama2
+      # Remote Ollama configuration - change this to your remote Ollama URL
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama2}
       - TTS_ENGINE=coqui
       - WHISPER_MODEL_SIZE=base
       - WHISPER_DEVICE=cpu
@@ -25,13 +26,12 @@ services:
       - ./logs:/app/logs
       - callbot_data:/app/data
     depends_on:
-      - ollama
       - redis
     restart: unless-stopped
     networks:
       - callbot-network
 
-  # Ollama AI service
+  # Ollama AI service (optional - can use remote Ollama instead)
   ollama:
     image: ollama/ollama:latest
     container_name: callbot-ollama
@@ -42,6 +42,8 @@ services:
     restart: unless-stopped
     networks:
       - callbot-network
+    profiles:
+      - local-ollama
 
   # Redis for caching and background tasks
   redis:
