@@ -1,25 +1,25 @@
-Flask==2.3.3
-Flask-SQLAlchemy==3.0.5
-Flask-Admin==1.6.1
-Werkzeug==2.3.7
+Flask
+Flask-SQLAlchemy
+Flask-Admin
+Werkzeug
 # REAL SIP LIBRARY - using pyVoIP for pure Python implementation
-pyVoIP==1.6.5
-faster-whisper>=0.10.0
-requests==2.31.0
-python-dotenv==1.0.0
-gunicorn==21.2.0
+pyVoIP
+faster-whisper
+requests
+python-dotenv
+gunicorn
 # TTS Libraries
-TTS==0.20.0  # Use older version compatible with numpy 1.22.0
-pyttsx3==2.90
+TTS
+pyttsx3
 # Audio processing
-soundfile==0.12.1
-numpy>=1.25.0  # Use newer numpy that works with scipy>=1.11.2
-librosa==0.10.1  # Use newer librosa
-pydub==0.25.1
+soundfile
+numpy
+librosa
+pydub
 # Background tasks
-redis==5.0.1
-celery==5.3.4
+redis
+celery
 # Additional dependencies for audio
-scipy>=1.11.2  # Required by TTS 0.20.0
-sounddevice==0.4.6
-pyaudio==0.2.14 
+scipy
+sounddevice
+pyaudio 
