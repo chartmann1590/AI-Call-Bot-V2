@@ -9,14 +9,9 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
-# PJSIP imports
-try:
-    import pjsua2 as pj
-    PJSIP_AVAILABLE = True
-except ImportError:
-    PJSIP_AVAILABLE = False
-    logger = logging.getLogger(__name__)
-    logger.warning("PJSIP not available - using mock implementation")
+# PJSIP imports - required for real SIP functionality
+import pjsua2 as pj
+PJSIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +150,6 @@ class SIPClient:
     
     def _init_pjsip(self):
         """Initialize PJSIP library"""
-        if not PJSIP_AVAILABLE:
-            logger.warning("PJSIP not available - using mock implementation")
-            return
-        
         try:
             # Create PJSIP endpoint
             self.ep = pj.Endpoint()
@@ -213,11 +204,6 @@ class SIPClient:
     
     def register(self) -> bool:
         """Register with SIP server"""
-        if not PJSIP_AVAILABLE:
-            logger.warning("Mock SIP registration - always successful")
-            self.registered = True
-            return True
-        
         try:
             # Registration is handled automatically by PJSIP
             # We just need to wait for registration to complete
@@ -330,7 +316,7 @@ class SIPClient:
     
     def shutdown(self):
         """Shutdown SIP client"""
-        if PJSIP_AVAILABLE and hasattr(self, 'ep'):
+        if hasattr(self, 'ep'):
             self.ep.libDestroy()
         
         logger.info("SIP client shutdown complete")

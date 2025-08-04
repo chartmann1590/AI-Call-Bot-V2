@@ -19,6 +19,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     portaudio19-dev \
     libasound2-dev \
     ffmpeg \
+    # PJSIP dependencies
+    libasound2-dev \
+    libssl-dev \
+    libspeex-dev \
+    libspeexdsp-dev \
+    libgsm1-dev \
+    libg7221-dev \
+    libsrtp2-dev \
+    libresample-dev \
+    libsamplerate0-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libavresample-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavcodec-extra \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
@@ -30,9 +48,22 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies with cache cleanup
+# Install Python dependencies with PJSIP fallback
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt || \
+    (echo "PJSIP pip install failed, trying alternative..." && \
+     pip install --no-cache-dir pjsua2==2.12 || \
+     (echo "Installing PJSIP from source..." && \
+      cd /tmp && \
+      git clone https://github.com/pjsip/pjproject.git && \
+      cd pjproject && \
+      ./configure --enable-shared --disable-sound --disable-resample --disable-video --disable-opencore-amr && \
+      make dep && make && \
+      cd pjsip-apps/src/python && \
+      python setup.py build && \
+      python setup.py install && \
+      cd /app && \
+      rm -rf /tmp/pjproject)) && \
     pip cache purge
 
 # Copy application code
