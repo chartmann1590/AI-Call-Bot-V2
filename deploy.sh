@@ -82,6 +82,70 @@ check_docker_settings() {
     fi
 }
 
+# Configure Ollama deployment
+configure_ollama_deployment() {
+    print_status "Configuring Ollama deployment..."
+    
+    echo
+    echo "Ollama Deployment Options:"
+    echo "1. Use remote Ollama (recommended for production)"
+    echo "2. Use local Ollama (requires more resources)"
+    echo "3. Skip Ollama configuration"
+    echo
+    
+    read -p "Choose an option (1-3): " ollama_choice
+    
+    case $ollama_choice in
+        1)
+            print_status "Configuring remote Ollama..."
+            
+            read -p "Enter your remote Ollama URL (e.g., https://your-ollama-server.com:11434): " ollama_url
+            
+            if [ -z "$ollama_url" ]; then
+                print_error "Ollama URL cannot be empty"
+                exit 1
+            fi
+            
+            read -p "Enter the model name (default: llama2): " ollama_model
+            ollama_model=${ollama_model:-llama2}
+            
+            # Set environment variables
+            export OLLAMA_URL="$ollama_url"
+            export OLLAMA_MODEL="$ollama_model"
+            
+            print_success "Remote Ollama configured:"
+            print_success "  URL: $ollama_url"
+            print_success "  Model: $ollama_model"
+            print_success "  Deployment: docker-compose up -d (without local Ollama)"
+            ;;
+            
+        2)
+            print_status "Configuring local Ollama..."
+            
+            read -p "Enter the model name (default: llama2): " ollama_model
+            ollama_model=${ollama_model:-llama2}
+            
+            # Set environment variables for local Ollama
+            export OLLAMA_URL="http://ollama:11434"
+            export OLLAMA_MODEL="$ollama_model"
+            
+            print_success "Local Ollama configured:"
+            print_success "  Model: $ollama_model"
+            print_success "  Deployment: docker-compose --profile local-ollama up -d"
+            ;;
+            
+        3)
+            print_status "Skipping Ollama configuration"
+            print_warning "You'll need to configure Ollama manually later"
+            ;;
+            
+        *)
+            print_error "Invalid option"
+            exit 1
+            ;;
+    esac
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_status "Checking prerequisites..."
@@ -291,7 +355,8 @@ services:
       - SIP_DOMAIN=\${SIP_DOMAIN:-pbx.example.com}
       - SIP_USERNAME=\${SIP_USERNAME:-1001}
       - SIP_PASSWORD=\${SIP_PASSWORD:-password}
-      - OLLAMA_URL=http://ollama:11434
+      # Ollama configuration - supports both remote and local
+      - OLLAMA_URL=\${OLLAMA_URL:-http://ollama:11434}
       - OLLAMA_MODEL=\${OLLAMA_MODEL:-llama2}
       - TTS_ENGINE=\${TTS_ENGINE:-coqui}
       - WHISPER_MODEL_SIZE=\${WHISPER_MODEL_SIZE:-base}
@@ -301,7 +366,6 @@ services:
       - ./logs:/app/logs
       - callbot_data:/app/data
     depends_on:
-      - ollama
       - redis
     restart: unless-stopped
     networks:
@@ -309,7 +373,7 @@ services:
     expose:
       - "5000"
 
-  # Ollama AI service
+  # Ollama AI service (optional - for local Ollama)
   ollama:
     image: ollama/ollama:latest
     container_name: callbot-ollama
@@ -320,6 +384,8 @@ services:
       - callbot-network
     expose:
       - "11434"
+    profiles:
+      - local-ollama
 
   # Redis for caching and background tasks
   redis:
@@ -526,7 +592,11 @@ show_deployment_info() {
     echo
     echo "Services:"
     echo "  - CallBot App: http://localhost:5000"
-    echo "  - Ollama AI: http://localhost:11434"
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        echo "  - Local Ollama AI: http://localhost:11434"
+    else
+        echo "  - Remote Ollama AI: $OLLAMA_URL"
+    fi
     echo "  - Redis: localhost:6379"
     echo
     echo "SSL Certificate:"
@@ -535,9 +605,15 @@ show_deployment_info() {
     echo "  - Valid for: $CERT_VALIDITY_DAYS days"
     echo
     echo "Useful commands:"
-    echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs -f"
-    echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down"
-    echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml restart"
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama logs -f"
+        echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down"
+        echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama restart"
+    else
+        echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs -f"
+        echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down"
+        echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml restart"
+    fi
     echo
     print_warning "Note: This uses a self-signed certificate. Browsers will show a security warning."
     print_warning "For production, replace with a proper SSL certificate from a trusted CA."
@@ -556,6 +632,9 @@ main() {
     
     # Pull latest changes
     pull_latest_changes
+    
+    # Configure Ollama deployment
+    configure_ollama_deployment
     
     # Generate SSL certificate
     generate_ssl_certificate
