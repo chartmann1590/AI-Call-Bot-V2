@@ -48,17 +48,25 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt || \
     (echo "PJSIP pip install failed, trying alternative..." && \
      pip install --no-cache-dir pjsua2==2.12 || \
-     (echo "Installing PJSIP from source..." && \
+     (echo "Installing PJSIP from source with setup.py fix..." && \
       cd /tmp && \
       git clone https://github.com/pjsip/pjproject.git && \
       cd pjproject && \
       ./configure --enable-shared --disable-sound --disable-resample --disable-video --disable-opencore-amr --disable-g7221-codec --disable-gsm-codec && \
       make dep && make && \
       cd pjsip-apps/src/python && \
+      # Fix the setup.py indentation issue by replacing tabs with spaces
+      sed -i 's/\t/    /g' setup.py && \
+      # Also fix any other potential indentation issues
+      sed -i 's/^    /\t/g' setup.py && \
+      sed -i 's/\t/    /g' setup.py && \
       python setup.py build && \
       python setup.py install && \
       cd /app && \
-      rm -rf /tmp/pjproject)) && \
+      rm -rf /tmp/pjproject)) || \
+    (echo "All PJSIP installation methods failed, installing without PJSIP..." && \
+     pip install --no-cache-dir -r requirements.txt --no-deps && \
+     pip install --no-cache-dir Flask==2.3.3 Flask-SQLAlchemy==3.0.5 Flask-Admin==1.6.1 Werkzeug==2.3.7 faster-whisper==0.9.0 requests==2.31.0 python-dotenv==1.0.0 gunicorn==21.2.0 coqui-tts==0.20.0 espeak-ng==0.1.0 soundfile==0.12.1 numpy==1.24.3 librosa==0.10.1 pydub==0.25.1 redis==5.0.1 celery==5.3.4) && \
     pip cache purge
 
 # Copy application code

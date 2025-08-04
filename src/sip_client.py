@@ -10,8 +10,14 @@ import numpy as np
 from pydub import AudioSegment
 
 # PJSIP imports - required for real SIP functionality
-import pjsua2 as pj
-PJSIP_AVAILABLE = True
+try:
+    import pjsua2 as pj
+    PJSIP_AVAILABLE = True
+except ImportError:
+    PJSIP_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.error("PJSIP not available - SIP functionality will be limited")
+    logger.error("This is a critical error for a call bot application")
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +156,10 @@ class SIPClient:
     
     def _init_pjsip(self):
         """Initialize PJSIP library"""
+        if not PJSIP_AVAILABLE:
+            logger.error("Cannot initialize PJSIP - library not available")
+            raise ImportError("PJSIP library not available")
+        
         try:
             # Create PJSIP endpoint
             self.ep = pj.Endpoint()
