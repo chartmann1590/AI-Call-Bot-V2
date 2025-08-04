@@ -146,6 +146,68 @@ configure_ollama_deployment() {
     esac
 }
 
+# Check Python version compatibility
+check_python_compatibility() {
+    print_status "Checking Python version compatibility..."
+    
+    # Check if we're using Python 3.9 in Docker
+    if grep -q "FROM python:3.9" Dockerfile; then
+        print_warning "Detected Python 3.9 in Dockerfile"
+        print_warning "The TTS package requires Python 3.10+ for compatibility"
+        
+        echo
+        echo "Python Version Compatibility Options:"
+        echo "1. Upgrade to Python 3.10+ (recommended)"
+        echo "2. Use alternative TTS engines (Python 3.9 compatible)"
+        echo "3. Continue with current setup (may fail)"
+        echo
+        
+        read -p "Choose an option (1-3): " python_choice
+        
+        case $python_choice in
+            1)
+                print_status "Upgrading to Python 3.10..."
+                
+                # Update Dockerfile
+                sed -i.bak 's/FROM python:3.9/FROM python:3.10/g' Dockerfile
+                sed -i.bak 's/FROM python:3.9/FROM python:3.10/g' Dockerfile.optimized
+                
+                # Update Python path in Dockerfile.optimized
+                sed -i.bak 's/python3.9\/site-packages/python3.10\/site-packages/g' Dockerfile.optimized
+                
+                print_success "Dockerfiles updated to Python 3.10"
+                print_success "This allows full TTS functionality including Coqui TTS"
+                ;;
+                
+            2)
+                print_status "Using alternative TTS engines..."
+                
+                # Use the Python 3.9 compatible requirements
+                if [ -f "requirements-python39.txt" ]; then
+                    cp requirements-python39.txt requirements.txt
+                    print_success "Updated requirements.txt to use alternative TTS engines"
+                    print_warning "This excludes Coqui TTS but keeps pyttsx3 and espeak-ng"
+                else
+                    print_error "requirements-python39.txt not found"
+                    exit 1
+                fi
+                ;;
+                
+            3)
+                print_warning "Continuing with Python 3.9 - build may fail"
+                print_warning "If build fails, run: ./fix-python-version.sh"
+                ;;
+                
+            *)
+                print_error "Invalid option"
+                exit 1
+                ;;
+        esac
+    else
+        print_success "Python version compatibility check passed"
+    fi
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_status "Checking prerequisites..."
@@ -174,6 +236,15 @@ check_prerequisites() {
     
     # Check Docker settings
     check_docker_settings
+    
+    # Check Python version compatibility
+    check_python_compatibility
+    
+    # Ensure fix script is executable
+    if [ -f "fix-python-version.sh" ]; then
+        chmod +x fix-python-version.sh
+        print_status "Fix script is ready: ./fix-python-version.sh"
+    fi
 }
 
 # Pull latest changes from git
@@ -475,6 +546,13 @@ show_troubleshooting_info() {
     echo "         TROUBLESHOOTING GUIDE"
     echo "=========================================="
     echo
+    echo "PYTHON VERSION COMPATIBILITY ISSUES:"
+    echo "If you see 'TypeError: unsupported operand type(s) for |':"
+    echo "1. Run the fix script: ./fix-python-version.sh"
+    echo "2. Or manually update Dockerfiles to Python 3.10"
+    echo "3. Or use alternative TTS engines with requirements-python39.txt"
+    echo
+    echo "DOCKER BUILD FAILURES:"
     echo "If Docker build fails with 'No space left on device':"
     echo
     echo "1. Clean Docker system:"
@@ -502,6 +580,12 @@ show_troubleshooting_info() {
     echo "   - Build with no cache: docker build --no-cache ."
     echo "   - Build with BuildKit: DOCKER_BUILDKIT=1 docker build ."
     echo
+    echo "TTS ENGINE ISSUES:"
+    echo "If TTS engines fail to initialize:"
+    echo "1. Check Python version compatibility"
+    echo "2. Ensure required system dependencies are installed"
+    echo "3. Try alternative TTS engines (pyttsx3, espeak-ng)"
+    echo
 }
 
 # Build Docker images with retry logic
@@ -528,6 +612,20 @@ build_with_retry() {
         fi
         
         print_warning "Build attempt $attempt failed"
+        
+        # Check for Python version related errors
+        if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
+            print_error "Python version compatibility error detected!"
+            print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
+            echo
+            echo "Quick fix options:"
+            echo "1. Run: ./fix-python-version.sh"
+            echo "2. Or manually:"
+            echo "   - Option A: Update Dockerfiles to Python 3.10"
+            echo "   - Option B: Use requirements-python39.txt"
+            echo
+            return 1
+        fi
         
         if [ $attempt -lt $max_attempts ]; then
             print_status "Cleaning Docker system and retrying..."
@@ -617,6 +715,14 @@ show_deployment_info() {
     echo
     print_warning "Note: This uses a self-signed certificate. Browsers will show a security warning."
     print_warning "For production, replace with a proper SSL certificate from a trusted CA."
+    echo
+    echo "Python Version Compatibility:"
+    if grep -q "FROM python:3.10" Dockerfile; then
+        print_success "Using Python 3.10 - Full TTS functionality available"
+    else
+        print_warning "Using Python 3.9 - Limited TTS functionality"
+        print_warning "Run ./fix-python-version.sh to upgrade to Python 3.10"
+    fi
     echo
 }
 

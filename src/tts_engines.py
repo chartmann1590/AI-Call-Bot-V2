@@ -11,8 +11,12 @@ import numpy as np
 try:
     from TTS.api import TTS
     COQUI_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     COQUI_AVAILABLE = False
+    logger.warning(f"TTS package not available: {e}")
+except Exception as e:
+    COQUI_AVAILABLE = False
+    logger.warning(f"TTS package error (possibly Python version compatibility): {e}")
 
 try:
     import pyttsx3

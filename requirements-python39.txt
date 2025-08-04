@@ -1,0 +1,25 @@
+Flask
+Flask-SQLAlchemy
+Flask-Admin
+Werkzeug
+# REAL SIP LIBRARY - using pyVoIP for pure Python implementation
+pyVoIP
+faster-whisper
+requests
+python-dotenv
+gunicorn
+# TTS Libraries (excluding TTS package for Python 3.9 compatibility)
+# TTS  # Excluded due to Python 3.9 compatibility issues
+pyttsx3
+# Audio processing
+soundfile
+numpy
+librosa
+pydub
+# Background tasks
+redis
+celery
+# Additional dependencies for audio
+scipy
+sounddevice
+pyaudio 

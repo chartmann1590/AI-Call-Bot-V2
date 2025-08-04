@@ -1,5 +1,5 @@
 # Multi-stage build to reduce final image size
-FROM python:3.9-slim as builder
+FROM python:3.10-slim as builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -44,7 +44,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip cache purge
 
 # Final stage
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy Python packages from builder stage
-COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
