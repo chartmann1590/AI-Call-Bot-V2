@@ -9,8 +9,9 @@ requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
 coqui-tts==0.25.3
+# espeak-ng==0.1.0  # Removed - installed as system dependency
 soundfile==0.12.1
-numpy==1.24.3
+numpy>=1.25.2,<2.0
 librosa==0.10.1
 pydub==0.25.1
 redis==5.0.1
