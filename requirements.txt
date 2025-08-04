@@ -2,17 +2,24 @@ Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Flask-Admin==1.6.1
 Werkzeug==2.3.7
-# REAL SIP LIBRARY - no mock implementations
-python-sip==0.1.0
+# REAL SIP LIBRARY - using pyVoIP for pure Python implementation
+pyVoIP==1.6.5
 faster-whisper>=0.10.0
 requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
-coqui-tts==0.25.3
-# espeak-ng==0.1.0  # Removed - installed as system dependency
+# TTS Libraries
+TTS==0.22.0  # Updated Coqui TTS package name
+pyttsx3==2.90
+# Audio processing
 soundfile==0.12.1
 numpy>=1.25.2,<2.0
 librosa==0.10.1
 pydub==0.25.1
+# Background tasks
 redis==5.0.1
-celery==5.3.4 
+celery==5.3.4
+# Additional dependencies for audio
+scipy>=1.11.0
+sounddevice==0.4.6
+pyaudio==0.2.14 

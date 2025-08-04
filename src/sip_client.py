@@ -9,8 +9,11 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
-# REAL SIP IMPORTS - python-sip library
-import sip
+# REAL SIP IMPORTS - pyVoIP library
+from pyVoIP.VoIP import VoIPPhone, InvalidStateError
+import socket
+import threading
+import time
 SIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
@@ -149,51 +152,45 @@ class SIPClient:
         self._init_sip()
     
     def _init_sip(self):
-        """Initialize REAL SIP library"""
+        """Initialize REAL pyVoIP library"""
         try:
-            # Initialize REAL sip library
-            self.sip_client = sip.SIPClient()
-            logger.info("Real SIP library initialized successfully")
+            # Initialize pyVoIP phone
+            self.phone = VoIPPhone(
+                self.domain, 
+                self.port, 
+                self.username, 
+                self.password,
+                callCallback=self._on_incoming_call,
+                myIP="0.0.0.0"
+            )
+            logger.info("Real pyVoIP library initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize SIP: {e}")
+            logger.error(f"Failed to initialize pyVoIP: {e}")
             raise
     
     def _create_account(self):
-        """Create REAL SIP account"""
+        """Create REAL pyVoIP account"""
         try:
-            # Account configuration for REAL SIP
-            account_config = {
-                'username': self.username,
-                'domain': self.domain,
-                'password': self.password,
-                'port': self.port
-            }
-            
-            # Create account with REAL SIP library
-            self.account = self.sip_client.create_account(account_config)
-            
-            # Set callbacks
-            self.callback = SIPCallback(self)
-            self.sip_client.set_callback(self.callback)
-            
-            logger.info(f"Real SIP account created for {self.username}@{self.domain}")
+            # pyVoIP account is created during initialization
+            # The phone object contains the account information
+            logger.info(f"Real pyVoIP account created for {self.username}@{self.domain}")
             
         except Exception as e:
-            logger.error(f"Failed to create SIP account: {e}")
+            logger.error(f"Failed to create pyVoIP account: {e}")
             raise
     
     async def register(self) -> bool:
-        """Register with REAL SIP server"""
+        """Register with REAL SIP server using pyVoIP"""
         try:
-            # REAL SIP registration
-            await self.sip_client.register(self.domain, self.username, self.password)
+            # Start pyVoIP phone
+            self.phone.start()
             self.registered = True
-            logger.info("Real SIP registration successful")
+            logger.info("Real pyVoIP registration successful")
             return True
             
         except Exception as e:
-            logger.error(f"Real SIP registration failed: {e}")
+            logger.error(f"Real pyVoIP registration failed: {e}")
             return False
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
@@ -203,6 +200,33 @@ class SIPClient:
         self.on_incoming_call = on_incoming_call
         self.on_call_transcript = on_call_transcript
         self.on_call_end = on_call_end
+    
+    def _on_incoming_call(self, call):
+        """Handle incoming call from pyVoIP"""
+        call_id = str(call.call_id)
+        caller_id = call.caller_id
+        
+        logger.info(f"Real pyVoIP incoming call {call_id} from {caller_id}")
+        
+        # Create call handler
+        call_handler = CallHandler(
+            call_id=call_id,
+            caller_id=caller_id,
+            on_transcript=lambda transcript: self._on_transcript(call_id, transcript),
+            on_call_end=lambda: self._on_call_end(call_id)
+        )
+        
+        # Store call handler
+        self.active_calls[call_id] = call_handler
+        
+        # Start call
+        call_handler.start_call()
+        
+        # Notify application
+        if self.on_incoming_call:
+            self.on_incoming_call(call_id, caller_id)
+        
+        return call_handler
     
     def handle_incoming_call(self, call_id: str, caller_id: str) -> CallHandler:
         """Handle incoming call"""
@@ -295,28 +319,30 @@ class SIPClient:
                 for call_id in self.active_calls.keys()}
     
     def shutdown(self):
-        """Shutdown REAL SIP client"""
+        """Shutdown REAL pyVoIP client"""
         try:
-            # Cleanup SIP resources
-            if hasattr(self, 'sip_client'):
-                self.sip_client.shutdown()
-            logger.info("Real SIP client shutdown complete")
+            # Cleanup pyVoIP resources
+            if hasattr(self, 'phone'):
+                self.phone.stop()
+            logger.info("Real pyVoIP client shutdown complete")
         except Exception as e:
-            logger.error(f"Error during SIP shutdown: {e}")
+            logger.error(f"Error during pyVoIP shutdown: {e}")
 
-class SIPCallback:
-    """REAL SIP callback handler"""
+class pyVoIPCallback:
+    """REAL pyVoIP callback handler"""
     
     def __init__(self, sip_client: SIPClient):
         self.sip_client = sip_client
     
     def on_registration_state(self, state: str, reason: str):
         """Handle registration state changes"""
-        logger.info(f"Real SIP registration state: {state} - {reason}")
+        logger.info(f"Real pyVoIP registration state: {state} - {reason}")
     
-    def on_incoming_call(self, call_id: str, caller_id: str):
-        """Handle incoming calls"""
-        logger.info(f"Real SIP incoming call from {caller_id}")
+    def on_incoming_call(self, call):
+        """Handle incoming calls from pyVoIP"""
+        call_id = str(call.call_id)
+        caller_id = call.caller_id
+        logger.info(f"Real pyVoIP incoming call from {caller_id}")
         
         # Handle call in main client
-        self.sip_client.handle_incoming_call(call_id, caller_id) 
+        self.sip_client._on_incoming_call(call) 
