@@ -10,7 +10,7 @@ import numpy as np
 from pydub import AudioSegment
 
 # REAL SIP IMPORTS - no mock implementations
-import aio_sip
+import sip
 SIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
@@ -155,8 +155,8 @@ class SIPClient:
             raise ImportError("SIP library not available")
         
         try:
-            # Initialize REAL aio-sip library
-            self.sip_client = aio_sip.SIPClient()
+            # Initialize REAL sip library
+            self.sip_client = sip.SIPClient()
             logger.info("REAL SIP library initialized successfully")
             
         except Exception as e:
