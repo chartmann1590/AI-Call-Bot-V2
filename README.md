@@ -30,8 +30,11 @@ CallBot is an intelligent phone assistant that automatically handles incoming ca
 - **AI-Powered Responses**: Integrates with Ollama for intelligent conversation
 - **Text-to-Speech**: Multiple free TTS engines (Coqui TTS, eSpeak NG, pyttsx3)
 - **Web Interface**: Modern dashboard for call history, settings, and monitoring
-- **Docker Support**: Complete containerized deployment
+- **Docker Support**: Complete containerized deployment with optimized builds
 - **Database Storage**: SQLite/PostgreSQL for call history and settings
+- **Remote Ollama Support**: Use any remote Ollama instance via URL and API
+- **Real SIP Implementation**: No mock implementations - uses real SIP libraries
+- **Flexible Deployment**: Choose between local and remote Ollama during deployment
 
 ## Architecture
 
@@ -67,7 +70,7 @@ CallBot integrates multiple technologies to create a seamless AI phone experienc
 
 ### Production Deployment (Recommended)
 
-For production deployment with SSL encryption:
+For production deployment with SSL encryption and flexible Ollama configuration:
 
 1. **Clone the repository**:
    ```bash
@@ -80,16 +83,22 @@ For production deployment with SSL encryption:
    ./deploy.sh
    ```
 
-3. **Access the application**:
+3. **Configure Ollama during deployment**:
+   - **Remote Ollama** (recommended): Use any remote Ollama instance
+   - **Local Ollama**: Run Ollama locally with more resources
+   - **Skip**: Configure manually later
+
+4. **Access the application**:
    - HTTPS: https://localhost (with SSL)
    - HTTP: http://localhost (redirects to HTTPS)
 
 The deployment script automatically:
 - Pulls latest changes from git
+- **Configures Ollama** (remote or local)
 - Generates self-signed SSL certificates
 - Configures nginx with SSL
 - Builds and deploys Docker containers
-- Starts all services
+- Starts all services with optimized settings
 
 ### Development Setup
 
@@ -101,16 +110,29 @@ The deployment script automatically:
 
 2. **Configure environment variables**:
    ```bash
-   cp docs/env.production.example .env
+   cp env.example .env
    # Edit .env with your settings
    ```
 
-3. **Start the services**:
+3. **Choose Ollama configuration**:
    ```bash
-   docker-compose up -d
+   # For remote Ollama
+   export OLLAMA_URL=https://your-ollama-server.com:11434
+   
+   # For local Ollama
+   docker-compose --profile local-ollama up -d
    ```
 
-4. **Access the web interface**:
+4. **Start the services**:
+   ```bash
+   # Remote Ollama
+   docker-compose up -d
+   
+   # Local Ollama
+   docker-compose --profile local-ollama up -d
+   ```
+
+5. **Access the web interface**:
    - Open http://localhost:5000
    - Configure SIP settings in the Settings page
    - Test AI connection
@@ -145,6 +167,9 @@ The deployment script automatically:
    export SIP_DOMAIN=your-pbx-domain
    export SIP_USERNAME=your-extension
    export SIP_PASSWORD=your-password
+   # For remote Ollama
+   export OLLAMA_URL=https://your-ollama-server.com:11434
+   # For local Ollama
    export OLLAMA_URL=http://localhost:11434
    ```
 
@@ -170,8 +195,13 @@ Configure your SIP PBX connection in the Settings page:
 
 ### AI Configuration
 
-- **Ollama URL**: Ollama server address (default: http://localhost:11434)
+- **Ollama URL**: Ollama server address
+  - **Remote**: `https://your-ollama-server.com:11434`
+  - **Local**: `http://ollama:11434` (default)
 - **Ollama Model**: AI model to use (e.g., llama2, mistral, codellama)
+- **Deployment Mode**: Choose during deployment
+  - Remote Ollama (recommended for production)
+  - Local Ollama (requires more resources)
 
 ### TTS Configuration
 
@@ -273,6 +303,7 @@ A-Call-Bot-V2/
    - Check SIP credentials in Settings
    - Verify PBX server is reachable
    - Check firewall settings
+   - Ensure real SIP library is installed
 
 2. **Whisper Not Working**:
    - Ensure sufficient RAM (2GB+ for base model)
@@ -280,7 +311,8 @@ A-Call-Bot-V2/
    - Try smaller model size
 
 3. **Ollama Connection Issues**:
-   - Verify Ollama service is running
+   - **Remote Ollama**: Verify URL is accessible and correct
+   - **Local Ollama**: Verify Ollama service is running
    - Check model is downloaded: `ollama list`
    - Test connection in Settings page
 
@@ -288,6 +320,11 @@ A-Call-Bot-V2/
    - Install system dependencies (espeak-ng)
    - Check TTS engine availability
    - Verify audio output directory permissions
+
+5. **Docker Build Issues**:
+   - Run `./deploy.sh` which includes automatic cleanup
+   - Check disk space: `df -h`
+   - Use optimized Dockerfile with dependency fixes
 
 ### Logs
 
@@ -383,12 +420,19 @@ For full license terms, see [LICENSE](LICENSE).
 The project includes several scripts for easy deployment and management:
 
 ### Production Deployment
-- **`deploy.sh`**: Complete production deployment with SSL
+- **`deploy.sh`**: Complete production deployment with SSL and Ollama configuration
   - Pulls latest git changes
+  - **Interactive Ollama configuration** (remote or local)
   - Generates self-signed SSL certificates
   - Configures nginx with SSL encryption
-  - Builds and deploys Docker containers
-  - Starts all services
+  - Builds and deploys Docker containers with optimized settings
+  - Starts all services with proper configuration
+
+### Ollama Configuration
+- **`configure-remote-ollama.sh`**: Easy Ollama setup
+  - Configure remote Ollama URLs
+  - Set up local Ollama if needed
+  - Update environment variables automatically
 
 ### Health Monitoring
 - **`health_check.sh`**: Verifies deployment health
@@ -407,8 +451,11 @@ The project includes several scripts for easy deployment and management:
 
 ### Usage Examples
 ```bash
-# Deploy to production
+# Deploy to production (interactive Ollama setup)
 ./deploy.sh
+
+# Configure Ollama manually
+./configure-remote-ollama.sh
 
 # Check system health
 ./health_check.sh
@@ -416,11 +463,17 @@ The project includes several scripts for easy deployment and management:
 # Create backup
 ./backup.sh
 
-# View logs
+# View logs (remote Ollama)
 docker-compose -f docker-compose.prod.yml logs -f
 
-# Stop services
+# View logs (local Ollama)
+docker-compose -f docker-compose.prod.yml --profile local-ollama logs -f
+
+# Stop services (remote Ollama)
 docker-compose -f docker-compose.prod.yml down
+
+# Stop services (local Ollama)
+docker-compose -f docker-compose.prod.yml --profile local-ollama down
 ```
 
 For detailed deployment instructions, see [docs/deployment.md](docs/deployment.md).
@@ -452,8 +505,17 @@ For issues and questions:
 - **Security Issues**: Email security@callbot.com (if applicable)
 - **Community**: Join our [Discord server](https://discord.gg/callbot) (if applicable)
 
-## Roadmap
+## Recent Improvements
 
+### ✅ Completed Features
+- **Remote Ollama Support**: Use any remote Ollama instance via URL and API
+- **Real SIP Implementation**: No mock implementations - uses real SIP libraries
+- **Interactive Deployment**: Choose between local and remote Ollama during deployment
+- **Optimized Docker Builds**: Fixed dependency conflicts and build issues
+- **Enhanced Error Handling**: Better troubleshooting and recovery
+- **Flexible Configuration**: Environment variables for all settings
+
+### 🚧 Roadmap
 - [ ] WebRTC support
 - [ ] Multi-language support
 - [ ] Advanced call routing
