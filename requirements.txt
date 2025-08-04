@@ -13,13 +13,13 @@ TTS==0.20.0  # Use older version compatible with numpy 1.22.0
 pyttsx3==2.90
 # Audio processing
 soundfile==0.12.1
-numpy==1.22.0  # Fixed version to match TTS requirements
-librosa==0.9.2  # Compatible with numpy 1.22.0
+numpy>=1.25.0  # Use newer numpy that works with scipy>=1.11.2
+librosa==0.10.1  # Use newer librosa
 pydub==0.25.1
 # Background tasks
 redis==5.0.1
 celery==5.3.4
 # Additional dependencies for audio
-scipy==1.8.0  # Compatible with numpy 1.22.0
+scipy>=1.11.2  # Required by TTS 0.20.0
 sounddevice==0.4.6
 pyaudio==0.2.14 
