@@ -19,21 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     portaudio19-dev \
     libasound2-dev \
     ffmpeg \
-    # PJSIP dependencies
-    libasound2-dev \
-    libssl-dev \
+    # PJSIP dependencies - only available packages
     libspeex-dev \
     libspeexdsp-dev \
     libgsm1-dev \
-    libg7221-dev \
     libsrtp2-dev \
-    libresample-dev \
     libsamplerate0-dev \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
     libswscale-dev \
-    libavresample-dev \
     libavdevice-dev \
     libavfilter-dev \
     libavcodec-extra \
@@ -57,7 +52,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
       cd /tmp && \
       git clone https://github.com/pjsip/pjproject.git && \
       cd pjproject && \
-      ./configure --enable-shared --disable-sound --disable-resample --disable-video --disable-opencore-amr && \
+      ./configure --enable-shared --disable-sound --disable-resample --disable-video --disable-opencore-amr --disable-g7221-codec --disable-gsm-codec && \
       make dep && make && \
       cd pjsip-apps/src/python && \
       python setup.py build && \
