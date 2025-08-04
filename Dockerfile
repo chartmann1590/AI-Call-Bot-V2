@@ -19,12 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     portaudio19-dev \
     libasound2-dev \
     ffmpeg \
-    # PJSIP dependencies - only available packages
-    libspeex-dev \
-    libspeexdsp-dev \
-    libgsm1-dev \
-    libsrtp2-dev \
-    libsamplerate0-dev \
+    # Audio processing dependencies
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
@@ -43,33 +38,9 @@ WORKDIR /app
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies with PJSIP fallback
+# Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt || \
-    (echo "PJSIP pip install failed, trying alternative..." && \
-     pip install --no-cache-dir pjsua2==2.12 || \
-     (echo "Installing PJSIP from source with comprehensive fixes..." && \
-      cd /tmp && \
-      git clone https://github.com/pjsip/pjproject.git && \
-      cd pjproject && \
-      ./configure --enable-shared --disable-sound --disable-resample --disable-video --disable-opencore-amr --disable-g7221-codec --disable-gsm-codec && \
-      make dep && make && \
-      cd pjsip-apps/src/python && \
-      # Fix Python 2/3 compatibility issues in setup.py
-      sed -i 's/print \([^)]*\)/print(\1)/g' setup.py && \
-      sed -i 's/print \([^)]*\)/print(\1)/g' setup.py && \
-      # Fix indentation issues
-      sed -i 's/\t/    /g' setup.py && \
-      # Create missing version.mak file
-      echo "PJ_VERSION_MAJOR=2" > ../../../../version.mak && \
-      echo "PJ_VERSION_MINOR=12" >> ../../../../version.mak && \
-      echo "PJ_VERSION_REV=0" >> ../../../../version.mak && \
-      python setup.py build && \
-      python setup.py install && \
-      cd /app && \
-      rm -rf /tmp/pjproject)) || \
-    (echo "All PJSIP installation methods failed, installing without PJSIP..." && \
-     pip install --no-cache-dir -r requirements-no-pjsip.txt) && \
+    pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
 
 # Copy application code

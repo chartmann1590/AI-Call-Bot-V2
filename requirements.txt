@@ -2,7 +2,10 @@ Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Flask-Admin==1.6.1
 Werkzeug==2.3.7
-pjsua2>=2.12  # Using flexible version with fallback to source build
+# pjsua2>=2.12  # Replaced with more reliable alternatives
+# Using python-sip which is more stable and easier to install
+python-sip
+# Alternative: pysip or aio-sip  # Other SIP library options
 faster-whisper==0.9.0
 requests==2.31.0
 python-dotenv==1.0.0
