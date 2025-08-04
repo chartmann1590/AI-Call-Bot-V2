@@ -2,9 +2,8 @@ Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Flask-Admin==1.6.1
 Werkzeug==2.3.7
-# pjsua2>=2.12  # Temporarily removed - will add proper SIP library later
-# TODO: Add proper SIP library once we find a reliable one
-# Options: aio-sip, pysip, or build custom SIP implementation
+# REAL SIP LIBRARY - no mock implementations
+aio-sip>=0.1.0
 faster-whisper==0.9.0
 requests==2.31.0
 python-dotenv==1.0.0

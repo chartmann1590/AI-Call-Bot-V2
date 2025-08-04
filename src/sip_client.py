@@ -9,11 +9,9 @@ import wave
 import numpy as np
 from pydub import AudioSegment
 
-# SIP imports - temporarily using mock implementation until we find a reliable SIP library
-SIP_AVAILABLE = False
-logger = logging.getLogger(__name__)
-logger.warning("SIP library not available - using mock implementation")
-logger.warning("TODO: Add proper SIP library (aio-sip, pysip, or custom implementation)")
+# REAL SIP IMPORTS - no mock implementations
+import aio_sip
+SIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
 
@@ -151,19 +149,15 @@ class SIPClient:
         self._init_sip()
     
     def _init_sip(self):
-        """Initialize SIP library"""
+        """Initialize REAL SIP library"""
         if not SIP_AVAILABLE:
-            logger.warning("Cannot initialize SIP - library not available, using mock")
-            # For now, we'll use a mock implementation
-            self.mock_mode = True
-            return
+            logger.error("Cannot initialize SIP - library not available")
+            raise ImportError("SIP library not available")
         
         try:
-            # Initialize SIP library
-            # Note: This is a simplified implementation
-            # In a real implementation, you would initialize the specific SIP library
-            logger.info("SIP library initialized successfully")
-            self.mock_mode = False
+            # Initialize REAL aio-sip library
+            self.sip_client = aio_sip.SIPClient()
+            logger.info("REAL SIP library initialized successfully")
             
         except Exception as e:
             logger.error(f"Failed to initialize SIP: {e}")
@@ -193,23 +187,17 @@ class SIPClient:
             logger.error(f"Failed to create SIP account: {e}")
             raise
     
-    def register(self) -> bool:
-        """Register with SIP server"""
-        if hasattr(self, 'mock_mode') and self.mock_mode:
-            logger.warning("Mock SIP registration - always successful")
-            self.registered = True
-            return True
-        
+    async def register(self) -> bool:
+        """Register with REAL SIP server"""
         try:
-            # Registration is handled automatically by SIP library
-            # We just need to wait for registration to complete
-            time.sleep(2)  # Give time for registration
+            # REAL SIP registration
+            await self.sip_client.register(self.domain, self.username, self.password)
             self.registered = True
-            logger.info("SIP registration successful")
+            logger.info("REAL SIP registration successful")
             return True
             
         except Exception as e:
-            logger.error(f"SIP registration failed: {e}")
+            logger.error(f"REAL SIP registration failed: {e}")
             return False
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
