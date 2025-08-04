@@ -27,6 +27,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavdevice-dev \
     libavfilter-dev \
     libavcodec-extra \
+    # Additional dependencies for new audio libraries
+    libpulse-dev \
+    libjack-jackd2-dev \
+    libsndfile1-dev \
+    libsamplerate0-dev \
+    libfftw3-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/* \
