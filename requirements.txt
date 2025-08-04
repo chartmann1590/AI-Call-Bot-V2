@@ -9,7 +9,7 @@ requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
 # TTS Libraries
-TTS==0.22.0  # Updated Coqui TTS package name
+TTS==0.20.0  # Use older version compatible with numpy 1.22.0
 pyttsx3==2.90
 # Audio processing
 soundfile==0.12.1
