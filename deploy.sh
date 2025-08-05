@@ -109,7 +109,16 @@ configure_ollama_deployment() {
             read -p "Enter the model name (default: llama2): " ollama_model
             ollama_model=${ollama_model:-llama2}
             
-            # Set environment variables
+            # Create or update .env file with Ollama configuration
+            if [ ! -f ".env" ]; then
+                cp env.example .env
+            fi
+            
+            # Update .env file with Ollama URL and model
+            sed -i.bak "s|# OLLAMA_URL=https://your-ollama-server.com:11434|OLLAMA_URL=$ollama_url|" .env
+            sed -i.bak "s|# OLLAMA_MODEL=llama2|OLLAMA_MODEL=$ollama_model|" .env
+            
+            # Set environment variables for current session
             export OLLAMA_URL="$ollama_url"
             export OLLAMA_MODEL="$ollama_model"
             
@@ -125,7 +134,16 @@ configure_ollama_deployment() {
             read -p "Enter the model name (default: llama2): " ollama_model
             ollama_model=${ollama_model:-llama2}
             
-            # Set environment variables for local Ollama
+            # Create or update .env file with Ollama configuration
+            if [ ! -f ".env" ]; then
+                cp env.example .env
+            fi
+            
+            # Update .env file with local Ollama URL and model
+            sed -i.bak "s|# OLLAMA_URL=https://your-ollama-server.com:11434|OLLAMA_URL=http://ollama:11434|" .env
+            sed -i.bak "s|# OLLAMA_MODEL=llama2|OLLAMA_MODEL=$ollama_model|" .env
+            
+            # Set environment variables for current session
             export OLLAMA_URL="http://ollama:11434"
             export OLLAMA_MODEL="$ollama_model"
             
@@ -469,6 +487,8 @@ services:
   callbot:
     build: .
     container_name: callbot-app
+    env_file:
+      - .env
     environment:
       - FLASK_ENV=production
       - SECRET_KEY=\${SECRET_KEY:-your-secret-key-change-in-production}
@@ -661,32 +681,62 @@ build_with_retry() {
         if docker info | grep -q "BuildKit"; then
             print_status "Using BuildKit for optimized builds..."
             export DOCKER_BUILDKIT=1
-            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
-                print_success "Build completed successfully on attempt $attempt"
-                return 0
+            if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
+                    print_success "Build completed successfully on attempt $attempt"
+                    return 0
+                fi
+            else
+                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
+                    print_success "Build completed successfully on attempt $attempt"
+                    return 0
+                fi
             fi
         else
             print_status "Using standard Docker build..."
-            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache; then
-                print_success "Build completed successfully on attempt $attempt"
-                return 0
+            if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama build --no-cache; then
+                    print_success "Build completed successfully on attempt $attempt"
+                    return 0
+                fi
+            else
+                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache; then
+                    print_success "Build completed successfully on attempt $attempt"
+                    return 0
+                fi
             fi
         fi
         
         print_warning "Build attempt $attempt failed"
         
         # Check for Python version related errors
-        if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
-            print_error "Python version compatibility error detected!"
-            print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
-            echo
-            echo "Quick fix options:"
-            echo "1. Run: ./fix-python-version.sh"
-            echo "2. Or manually:"
-            echo "   - Option A: Update Dockerfiles to Python 3.10"
-            echo "   - Option B: Use requirements-python39.txt"
-            echo
-            return 1
+        if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
+                print_error "Python version compatibility error detected!"
+                print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
+                echo
+                echo "Quick fix options:"
+                echo "1. Run: ./fix-python-version.sh"
+                echo "2. Or manually:"
+                echo "   - Option A: Update Dockerfiles to Python 3.10"
+                echo "   - Option B: Use requirements-python39.txt"
+                echo
+                return 1
+            fi
+                else
+            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
+                print_error "Python version compatibility error detected!"
+                print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
+                echo
+                echo "Quick fix options:"
+                echo "1. Run: ./fix-python-version.sh"
+                echo "2. Or manually:"
+                echo "   - Option A: Update Dockerfiles to Python 3.10"
+                echo "   - Option B: Use requirements-python39.txt"
+                echo
+                return 1
+            fi
+        fi
         fi
         
         if [ $attempt -lt $max_attempts ]; then
@@ -786,14 +836,22 @@ fast_update() {
     
     # Stop existing containers
     print_status "Stopping existing containers..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down || true
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    fi
     
     # Pull latest changes
     pull_latest_changes
     
     # Start services with existing images (no rebuild)
     print_status "Starting services with existing images..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama up -d
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    fi
     
     # Wait for services to be ready
     print_status "Waiting for services to be ready..."
@@ -801,7 +859,11 @@ fast_update() {
     
     # Check if services are running
     print_status "Checking service status..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama ps
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    fi
     
     print_success "Fast update completed successfully!"
 }
@@ -818,7 +880,11 @@ full_rebuild() {
     
     # Stop existing containers
     print_status "Stopping existing containers..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down || true
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    fi
     
     # Build and start the application with retry logic
     print_status "Building Docker images with optimized settings..."
@@ -830,7 +896,11 @@ full_rebuild() {
     fi
     
     print_status "Starting services..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama up -d
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    fi
     
     # Wait for services to be ready
     print_status "Waiting for services to be ready..."
@@ -838,7 +908,11 @@ full_rebuild() {
     
     # Check if services are running
     print_status "Checking service status..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama ps
+    else
+        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    fi
     
     # Save requirements hash for future comparisons
     save_requirements_hash
