@@ -49,9 +49,14 @@
                         <div class="form-text">SIP server port (usually 5060)</div>
                     </div>
                     
-                    <button type="button" class="btn btn-outline-primary" onclick="testSIPConnection()">
-                        <i class="fas fa-phone me-1"></i>Test SIP Connection
-                    </button>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-primary" onclick="testSIPConnection()">
+                            <i class="fas fa-phone me-1"></i>Test SIP Connection
+                        </button>
+                        <button type="button" class="btn btn-outline-warning" onclick="debugSIP()">
+                            <i class="fas fa-bug me-1"></i>Debug SIP
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -408,6 +413,33 @@ function testSIPConnection() {
             $('#testResultsContent').html(`
                 <div class="alert alert-danger">
                     <i class="fas fa-times-circle me-2"></i>Failed to test SIP connection
+                </div>
+            `);
+        });
+}
+
+function debugSIP() {
+    $('#testResultsContent').html(`
+        <div class="text-center">
+            <div class="spinner-border text-warning" role="status">
+                <span class="visually-hidden">Debugging SIP...</span>
+            </div>
+            <p class="mt-2">Getting SIP debug information...</p>
+        </div>
+    `);
+    $('#testResultsModal').modal('show');
+    
+    $.get('/api/debug_sip')
+        .done(function(data) {
+            let debugHtml = '<h6>SIP Debug Information:</h6><pre class="bg-light p-3">';
+            debugHtml += JSON.stringify(data, null, 2);
+            debugHtml += '</pre>';
+            $('#testResultsContent').html(debugHtml);
+        })
+        .fail(function() {
+            $('#testResultsContent').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>Failed to get SIP debug information
                 </div>
             `);
         });

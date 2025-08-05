@@ -154,6 +154,8 @@ class SIPClient:
     def _init_sip(self):
         """Initialize REAL pyVoIP library"""
         try:
+            logger.info(f"Initializing pyVoIP with domain={self.domain}, port={self.port}, username={self.username}")
+            
             # Initialize pyVoIP phone
             self.phone = VoIPPhone(
                 self.domain, 
@@ -164,9 +166,14 @@ class SIPClient:
                 myIP="0.0.0.0"
             )
             logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
+            logger.info(f"Phone object type: {type(self.phone)}")
+            logger.info(f"Phone object attributes: {dir(self.phone)}")
             
         except Exception as e:
             logger.error(f"Failed to initialize pyVoIP: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
     def _create_account(self):
@@ -184,15 +191,28 @@ class SIPClient:
         """Register with REAL SIP server using pyVoIP"""
         try:
             logger.info(f"Attempting to register with SIP server {self.domain}:{self.port}")
+            logger.info(f"Phone object exists: {hasattr(self, 'phone')}")
+            logger.info(f"Phone object: {self.phone}")
+            
+            if not hasattr(self, 'phone') or self.phone is None:
+                logger.error("Phone object not initialized!")
+                return False
             
             # Start pyVoIP phone
+            logger.info("Calling phone.start()...")
             self.phone.start()
+            logger.info("phone.start() completed successfully")
+            
             self.registered = True
             logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain}")
+            logger.info(f"Registration status: {self.registered}")
             return True
             
         except Exception as e:
             logger.error(f"Real pyVoIP registration failed for {self.username}@{self.domain}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             self.registered = False
             return False
     

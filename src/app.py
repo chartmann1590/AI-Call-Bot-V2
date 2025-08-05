@@ -76,22 +76,30 @@ def create_app(config_name='default'):
                 logger.info("TTS manager initialized")
                 
                 # Initialize SIP client
+                logger.info(f"Initializing SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
                 app.sip_client = SIPClient(
                     domain=settings.sip_domain,
                     username=settings.sip_username,
                     password=settings.sip_password,
                     port=settings.sip_port
                 )
+                logger.info("SIP client created successfully")
                 
                 # Set SIP callbacks
+                logger.info("Setting SIP callbacks...")
                 app.sip_client.set_callbacks(
                     on_incoming_call=app._handle_incoming_call,
                     on_call_transcript=app._handle_call_transcript,
                     on_call_end=app._handle_call_end
                 )
+                logger.info("SIP callbacks set successfully")
                 
                 # Register with SIP server
-                if app.sip_client.register():
+                logger.info("Attempting to register SIP client...")
+                registration_result = app.sip_client.register()
+                logger.info(f"SIP registration result: {registration_result}")
+                
+                if registration_result:
                     logger.info("SIP client registered successfully")
                 else:
                     logger.error("SIP registration failed")
@@ -306,15 +314,22 @@ def create_app(config_name='default'):
             logger.info(f"Testing SIP connection to {settings.sip_domain}:{settings.sip_port}")
             
             # Create a test SIP client
+            logger.info("Creating test SIP client...")
             test_sip_client = SIPClient(
                 domain=settings.sip_domain,
                 username=settings.sip_username,
                 password=settings.sip_password,
                 port=settings.sip_port
             )
+            logger.info("Test SIP client created")
             
             # Try to register
-            if test_sip_client.register():
+            logger.info("Attempting test registration...")
+            registration_result = test_sip_client.register()
+            logger.info(f"Test registration result: {registration_result}")
+            
+            if registration_result:
+                logger.info("Test registration successful")
                 test_sip_client.shutdown()
                 return jsonify({
                     'connected': True,
@@ -323,6 +338,7 @@ def create_app(config_name='default'):
                     'username': settings.sip_username
                 })
             else:
+                logger.error("Test registration failed")
                 test_sip_client.shutdown()
                 return jsonify({
                     'connected': False,
@@ -333,6 +349,8 @@ def create_app(config_name='default'):
                 
         except Exception as e:
             logger.error(f"Error testing SIP connection: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({
                 'connected': False,
                 'error': str(e),
@@ -343,13 +361,17 @@ def create_app(config_name='default'):
     def api_sip_status():
         """Get current SIP registration status"""
         try:
+            logger.info(f"Checking SIP status - app.sip_client exists: {app.sip_client is not None}")
+            
             if app.sip_client:
                 status = app.sip_client.get_registration_status()
+                logger.info(f"SIP status: {status}")
                 return jsonify({
                     'connected': status['registered'],
                     'status': status
                 })
             else:
+                logger.warning("SIP client not initialized")
                 return jsonify({
                     'connected': False,
                     'error': 'SIP client not initialized'
@@ -360,6 +382,33 @@ def create_app(config_name='default'):
                 'connected': False,
                 'error': str(e)
             })
+    
+    @app.route('/api/debug_sip')
+    def api_debug_sip():
+        """Debug SIP client state"""
+        try:
+            debug_info = {
+                'app_sip_client_exists': app.sip_client is not None,
+                'app_sip_client_type': str(type(app.sip_client)) if app.sip_client else None,
+                'app_sip_client_attrs': dir(app.sip_client) if app.sip_client else None,
+            }
+            
+            if app.sip_client:
+                debug_info.update({
+                    'sip_registered': app.sip_client.is_registered(),
+                    'sip_domain': app.sip_client.domain,
+                    'sip_username': app.sip_client.username,
+                    'sip_port': app.sip_client.port,
+                    'sip_has_phone': hasattr(app.sip_client, 'phone'),
+                    'sip_phone_type': str(type(app.sip_client.phone)) if hasattr(app.sip_client, 'phone') else None,
+                })
+            
+            logger.info(f"Debug SIP info: {debug_info}")
+            return jsonify(debug_info)
+            
+        except Exception as e:
+            logger.error(f"Error in debug SIP: {e}")
+            return jsonify({'error': str(e)})
     
     @app.route('/api/fetch_ollama_models', methods=['POST'])
     def api_fetch_ollama_models():
