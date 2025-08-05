@@ -723,7 +723,7 @@ build_with_retry() {
                 echo
                 return 1
             fi
-                else
+        else
             if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
                 print_error "Python version compatibility error detected!"
                 print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
@@ -736,7 +736,6 @@ build_with_retry() {
                 echo
                 return 1
             fi
-        fi
         fi
         
         if [ $attempt -lt $max_attempts ]; then
