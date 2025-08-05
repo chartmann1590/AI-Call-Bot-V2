@@ -546,6 +546,12 @@ show_troubleshooting_info() {
     echo "         TROUBLESHOOTING GUIDE"
     echo "=========================================="
     echo
+    echo "DEPLOYMENT OPTIONS:"
+    echo "The script now offers three deployment types:"
+    echo "1. Full Rebuild - Rebuilds everything from scratch (slowest)"
+    echo "2. Fast Update - Uses existing images, only updates code (fastest)"
+    echo "3. Smart Deploy - Automatically chooses based on requirements.txt changes"
+    echo
     echo "PYTHON VERSION COMPATIBILITY ISSUES:"
     echo "If you see 'TypeError: unsupported operand type(s) for |':"
     echo "1. Run the fix script: ./fix-python-version.sh"
@@ -579,6 +585,12 @@ show_troubleshooting_info() {
     echo "6. Alternative build commands:"
     echo "   - Build with no cache: docker build --no-cache ."
     echo "   - Build with BuildKit: DOCKER_BUILDKIT=1 docker build ."
+    echo
+    echo "FAST UPDATE ISSUES:"
+    echo "If fast update doesn't work as expected:"
+    echo "1. Try a full rebuild to ensure all dependencies are up to date"
+    echo "2. Check if requirements.txt has changed (requires full rebuild)"
+    echo "3. Clear the .requirements_hash file to force a full rebuild"
     echo
     echo "TTS ENGINE ISSUES:"
     echo "If TTS engines fail to initialize:"
@@ -640,42 +652,7 @@ build_with_retry() {
     return 1
 }
 
-# Build and deploy the application
-deploy_application() {
-    print_status "Building and deploying the application..."
-    
-    # Check disk space first
-    check_disk_space
-    
-    # Clean Docker system to free up space
-    clean_docker_system
-    
-    # Stop existing containers
-    print_status "Stopping existing containers..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
-    
-    # Build and start the application with retry logic
-    print_status "Building Docker images with optimized settings..."
-    
-    if ! build_with_retry; then
-        print_error "Failed to build Docker images after multiple attempts"
-        print_error "Please check disk space and Docker configuration"
-        exit 1
-    fi
-    
-    print_status "Starting services..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
-    
-    # Wait for services to be ready
-    print_status "Waiting for services to be ready..."
-    sleep 30
-    
-    # Check if services are running
-    print_status "Checking service status..."
-    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
-    
-    print_success "Application deployed successfully!"
-}
+
 
 # Display deployment information
 show_deployment_info() {
@@ -726,6 +703,99 @@ show_deployment_info() {
     echo
 }
 
+# Check if requirements.txt has changed
+check_requirements_changed() {
+    print_status "Checking if requirements.txt has changed..."
+    
+    if [ ! -f ".requirements_hash" ]; then
+        print_status "No previous requirements hash found - will do full rebuild"
+        return 0  # Changed
+    fi
+    
+    local current_hash=$(sha256sum requirements.txt | cut -d' ' -f1)
+    local stored_hash=$(cat .requirements_hash 2>/dev/null || echo "")
+    
+    if [ "$current_hash" != "$stored_hash" ]; then
+        print_warning "requirements.txt has changed - full rebuild required"
+        return 0  # Changed
+    else
+        print_success "requirements.txt unchanged - can use fast update"
+        return 1  # Not changed
+    fi
+}
+
+# Save requirements hash
+save_requirements_hash() {
+    sha256sum requirements.txt > .requirements_hash
+    print_status "Saved requirements hash for future comparisons"
+}
+
+# Fast update deployment
+fast_update() {
+    print_status "Performing fast update deployment..."
+    
+    # Stop existing containers
+    print_status "Stopping existing containers..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    
+    # Pull latest changes
+    pull_latest_changes
+    
+    # Start services with existing images (no rebuild)
+    print_status "Starting services with existing images..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    
+    # Wait for services to be ready
+    print_status "Waiting for services to be ready..."
+    sleep 15
+    
+    # Check if services are running
+    print_status "Checking service status..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    
+    print_success "Fast update completed successfully!"
+}
+
+# Full rebuild deployment
+full_rebuild() {
+    print_status "Performing full rebuild deployment..."
+    
+    # Check disk space first
+    check_disk_space
+    
+    # Clean Docker system to free up space
+    clean_docker_system
+    
+    # Stop existing containers
+    print_status "Stopping existing containers..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
+    
+    # Build and start the application with retry logic
+    print_status "Building Docker images with optimized settings..."
+    
+    if ! build_with_retry; then
+        print_error "Failed to build Docker images after multiple attempts"
+        print_error "Please check disk space and Docker configuration"
+        exit 1
+    fi
+    
+    print_status "Starting services..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    
+    # Wait for services to be ready
+    print_status "Waiting for services to be ready..."
+    sleep 30
+    
+    # Check if services are running
+    print_status "Checking service status..."
+    $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+    
+    # Save requirements hash for future comparisons
+    save_requirements_hash
+    
+    print_success "Full rebuild completed successfully!"
+}
+
 # Main deployment function
 main() {
     echo "=========================================="
@@ -736,8 +806,39 @@ main() {
     # Check prerequisites
     check_prerequisites
     
-    # Pull latest changes
-    pull_latest_changes
+    # Check deployment type
+    echo "Deployment Options:"
+    echo "1. Full Rebuild (no cache, rebuilds everything)"
+    echo "2. Fast Update (uses existing images, only updates code)"
+    echo "3. Smart Deploy (automatically chooses based on changes)"
+    echo
+    
+    read -p "Choose deployment type (1-3): " deploy_choice
+    
+    case $deploy_choice in
+        1)
+            print_status "Selected: Full Rebuild"
+            DEPLOY_TYPE="full"
+            ;;
+        2)
+            print_status "Selected: Fast Update"
+            DEPLOY_TYPE="fast"
+            ;;
+        3)
+            print_status "Selected: Smart Deploy"
+            if check_requirements_changed; then
+                print_status "Requirements changed - will do full rebuild"
+                DEPLOY_TYPE="full"
+            else
+                print_status "No requirements changes - will do fast update"
+                DEPLOY_TYPE="fast"
+            fi
+            ;;
+        *)
+            print_error "Invalid option"
+            exit 1
+            ;;
+    esac
     
     # Configure Ollama deployment
     configure_ollama_deployment
@@ -751,11 +852,11 @@ main() {
     # Update docker-compose for production
     update_docker_compose
     
-    # Deploy the application
-    if ! deploy_application; then
-        print_error "Deployment failed!"
-        show_troubleshooting_info
-        exit 1
+    # Deploy based on type
+    if [ "$DEPLOY_TYPE" = "fast" ]; then
+        fast_update
+    else
+        full_rebuild
     fi
     
     # Show deployment information
