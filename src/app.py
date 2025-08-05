@@ -143,8 +143,13 @@ def create_app(config_name='default'):
         
         if request.method == 'POST':
             try:
+                # Check if Ollama URL has changed
+                old_ollama_url = settings_obj.ollama_url
+                new_ollama_url = request.form['ollama_url']
+                ollama_url_changed = old_ollama_url != new_ollama_url
+                
                 # Update settings
-                settings_obj.ollama_url = request.form['ollama_url']
+                settings_obj.ollama_url = new_ollama_url
                 settings_obj.ollama_model = request.form['ollama_model']
                 settings_obj.tts_engine = request.form['tts_engine']
                 settings_obj.tts_voice = request.form['tts_voice']
@@ -156,7 +161,22 @@ def create_app(config_name='default'):
                 settings_obj.whisper_device = request.form['whisper_device']
                 
                 db.session.commit()
-                flash('Settings saved successfully!', 'success')
+                
+                # If Ollama URL changed, automatically fetch and update available models
+                if ollama_url_changed:
+                    try:
+                        # Create new Ollama client with updated URL
+                        new_ollama_client = OllamaClient(new_ollama_url)
+                        available_models = new_ollama_client.list_models() or []
+                        
+                        if available_models:
+                            flash(f'Settings saved successfully! Found {len(available_models)} available models: {", ".join(available_models)}', 'success')
+                        else:
+                            flash('Settings saved successfully! Warning: No models found at the new Ollama URL.', 'warning')
+                    except Exception as e:
+                        flash(f'Settings saved successfully! Warning: Could not fetch models from new Ollama URL: {str(e)}', 'warning')
+                else:
+                    flash('Settings saved successfully!', 'success')
                 
                 # Reinitialize components with new settings
                 def reinit_components():
@@ -257,6 +277,32 @@ def create_app(config_name='default'):
             status = app.ollama_client.test_connection()
             return jsonify(status)
         return jsonify({'connected': False, 'error': 'Ollama client not initialized'})
+    
+    @app.route('/api/fetch_ollama_models', methods=['POST'])
+    def api_fetch_ollama_models():
+        """Fetch available models from Ollama server"""
+        try:
+            data = request.get_json()
+            ollama_url = data.get('ollama_url')
+            
+            if not ollama_url:
+                return jsonify({'success': False, 'error': 'Ollama URL is required'})
+            
+            # Create temporary client to fetch models
+            temp_client = OllamaClient(ollama_url)
+            models = temp_client.list_models() or []
+            
+            return jsonify({
+                'success': True,
+                'models': models,
+                'count': len(models)
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            })
     
     @app.route('/api/audio/<int:call_id>')
     def api_audio(call_id):

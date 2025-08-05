@@ -85,9 +85,14 @@
                         <div class="form-text">AI model to use for generating responses</div>
                     </div>
                     
-                    <button type="button" class="btn btn-outline-success" onclick="testOllamaConnection()">
-                        <i class="fas fa-brain me-1"></i>Test AI Connection
-                    </button>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-primary" onclick="fetchOllamaModels()">
+                            <i class="fas fa-sync-alt me-1"></i>Fetch Models
+                        </button>
+                        <button type="button" class="btn btn-outline-success" onclick="testOllamaConnection()">
+                            <i class="fas fa-brain me-1"></i>Test AI Connection
+                        </button>
+                    </div>
                     
                     <div id="ollama-status" class="mt-2"></div>
                 </div>
@@ -285,6 +290,78 @@ function testOllamaConnection() {
         });
 }
 
+function fetchOllamaModels() {
+    const url = $('#ollama_url').val();
+    
+    if (!url) {
+        return;
+    }
+    
+    // Show loading state
+    const modelSelect = $('#ollama_model');
+    const currentValue = modelSelect.val();
+    
+    modelSelect.html('<option value="">Loading models...</option>');
+    modelSelect.prop('disabled', true);
+    
+    $.ajax({
+        url: '/api/fetch_ollama_models',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ollama_url: url }),
+        success: function(data) {
+            modelSelect.prop('disabled', false);
+            
+            if (data.success && data.models.length > 0) {
+                // Clear and populate with new models
+                modelSelect.html('<option value="">Select a model...</option>');
+                
+                data.models.forEach(function(model) {
+                    const option = $('<option></option>')
+                        .val(model)
+                        .text(model)
+                        .prop('selected', model === currentValue);
+                    modelSelect.append(option);
+                });
+                
+                // Show success message
+                $('#ollama-status').html(`
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>Successfully loaded ${data.count} models from ${url}
+                    </div>
+                `);
+            } else {
+                // Reset to original state
+                modelSelect.html('<option value="">Select a model...</option>');
+                if (currentValue) {
+                    modelSelect.append(`<option value="${currentValue}" selected>${currentValue}</option>`);
+                }
+                
+                // Show error message
+                const errorMsg = data.error || 'No models found';
+                $('#ollama-status').html(`
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>Could not load models: ${errorMsg}
+                    </div>
+                `);
+            }
+        },
+        error: function() {
+            modelSelect.prop('disabled', false);
+            modelSelect.html('<option value="">Select a model...</option>');
+            if (currentValue) {
+                modelSelect.append(`<option value="${currentValue}" selected>${currentValue}</option>`);
+            }
+            
+            $('#ollama-status').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>Failed to fetch models from ${url}
+                </div>
+            `);
+        }
+    });
+}
+
 function testSIPConnection() {
     const domain = $('#sip_domain').val();
     const username = $('#sip_username').val();
@@ -360,6 +437,15 @@ $(document).ready(function() {
         });
         updateTTSVoices();
     }
+    
+    // Auto-fetch models when Ollama URL changes
+    $('#ollama_url').on('change', function() {
+        // Add a small delay to avoid too many requests
+        clearTimeout(window.ollamaUrlTimeout);
+        window.ollamaUrlTimeout = setTimeout(function() {
+            fetchOllamaModels();
+        }, 500);
+    });
 });
 </script>
 {% endblock %} 
