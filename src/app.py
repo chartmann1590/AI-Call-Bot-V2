@@ -401,7 +401,7 @@ def create_app(config_name='default'):
                     'sip_domain': app.sip_client.domain,
                     'sip_username': app.sip_client.username,
                     'sip_port': app.sip_client.port,
-                    'sip_local_port': app.sip_client.local_port,
+
                     'sip_has_phone': hasattr(app.sip_client, 'phone'),
                     'sip_phone_type': str(type(app.sip_client.phone)) if hasattr(app.sip_client, 'phone') else None,
                 })
