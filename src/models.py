@@ -50,7 +50,7 @@ class Settings(db.Model):
     __tablename__ = 'settings'
     
     id = db.Column(db.Integer, primary_key=True)
-    ollama_url = db.Column(db.String(255), nullable=False, default='http://localhost:11434')
+    ollama_url = db.Column(db.String(255), nullable=False, default='')
     ollama_model = db.Column(db.String(100), nullable=False, default='llama2')
     tts_engine = db.Column(db.String(50), nullable=False, default='coqui')
     tts_voice = db.Column(db.String(100), nullable=False, default='en_0')
@@ -68,9 +68,21 @@ class Settings(db.Model):
     @classmethod
     def get_settings(cls):
         """Get the singleton settings instance, create if doesn't exist"""
+        import os
         settings = cls.query.first()
         if not settings:
             settings = cls()
+            # Initialize with environment variables if available
+            settings.ollama_url = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+            settings.ollama_model = os.environ.get('OLLAMA_MODEL', 'llama2')
+            settings.tts_engine = os.environ.get('TTS_ENGINE', 'coqui')
+            settings.tts_voice = os.environ.get('TTS_VOICE', 'en_0')
+            settings.sip_domain = os.environ.get('SIP_DOMAIN', '')
+            settings.sip_username = os.environ.get('SIP_USERNAME', '')
+            settings.sip_password = os.environ.get('SIP_PASSWORD', '')
+            settings.sip_port = int(os.environ.get('SIP_PORT', 5060))
+            settings.whisper_model_size = os.environ.get('WHISPER_MODEL_SIZE', 'base')
+            settings.whisper_device = os.environ.get('WHISPER_DEVICE', 'cpu')
             db.session.add(settings)
             db.session.commit()
         return settings
@@ -90,4 +102,22 @@ class Settings(db.Model):
             'whisper_model_size': self.whisper_model_size,
             'whisper_device': self.whisper_device,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        } 
+        }
+    
+    @classmethod
+    def reset_settings(cls):
+        """Reset settings to environment variables"""
+        import os
+        settings = cls.get_settings()
+        settings.ollama_url = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+        settings.ollama_model = os.environ.get('OLLAMA_MODEL', 'llama2')
+        settings.tts_engine = os.environ.get('TTS_ENGINE', 'coqui')
+        settings.tts_voice = os.environ.get('TTS_VOICE', 'en_0')
+        settings.sip_domain = os.environ.get('SIP_DOMAIN', '')
+        settings.sip_username = os.environ.get('SIP_USERNAME', '')
+        settings.sip_password = os.environ.get('SIP_PASSWORD', '')
+        settings.sip_port = int(os.environ.get('SIP_PORT', 5060))
+        settings.whisper_model_size = os.environ.get('WHISPER_MODEL_SIZE', 'base')
+        settings.whisper_device = os.environ.get('WHISPER_DEVICE', 'cpu')
+        db.session.commit()
+        return settings 

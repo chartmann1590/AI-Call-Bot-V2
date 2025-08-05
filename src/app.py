@@ -53,15 +53,20 @@ def create_app(config_name='default'):
     def init_components():
         with app.app_context():
             try:
+                # Wait a moment for database to be ready
+                time.sleep(1)
+                
                 # Initialize Whisper transcriber
                 settings = Settings.get_settings()
+                logger.info(f"Loaded settings - Ollama URL: {settings.ollama_url}")
+                
                 app.whisper_transcriber = WhisperTranscriber(
                     model_size=settings.whisper_model_size,
                     device=settings.whisper_device
                 )
                 logger.info("Whisper transcriber initialized")
                 
-                # Initialize Ollama client
+                # Initialize Ollama client with current settings
                 logger.info(f"Initializing Ollama client with URL: {settings.ollama_url}")
                 app.ollama_client = OllamaClient(settings.ollama_url)
                 logger.info("Ollama client initialized")
@@ -274,10 +279,24 @@ def create_app(config_name='default'):
     @app.route('/api/test_ollama')
     def api_test_ollama():
         """Test Ollama connection"""
-        if app.ollama_client:
-            status = app.ollama_client.test_connection()
+        try:
+            # Get current settings and create a fresh client
+            settings = Settings.get_settings()
+            logger.info(f"Testing Ollama connection with URL: {settings.ollama_url}")
+            
+            # Create a fresh client with current settings
+            test_client = OllamaClient(settings.ollama_url)
+            status = test_client.test_connection()
+            
+            # Also update the app's client if test succeeds
+            if status.get('connected'):
+                app.ollama_client = test_client
+                logger.info("Updated app Ollama client with working connection")
+            
             return jsonify(status)
-        return jsonify({'connected': False, 'error': 'Ollama client not initialized'})
+        except Exception as e:
+            logger.error(f"Error testing Ollama connection: {e}")
+            return jsonify({'connected': False, 'error': str(e), 'url': settings.ollama_url if 'settings' in locals() else 'unknown'})
     
     @app.route('/api/fetch_ollama_models', methods=['POST'])
     def api_fetch_ollama_models():
@@ -289,9 +308,13 @@ def create_app(config_name='default'):
             if not ollama_url:
                 return jsonify({'success': False, 'error': 'Ollama URL is required'})
             
+            logger.info(f"Fetching models from URL: {ollama_url}")
+            
             # Create temporary client to fetch models
             temp_client = OllamaClient(ollama_url)
             models = temp_client.list_models() or []
+            
+            logger.info(f"Found {len(models)} models: {models}")
             
             return jsonify({
                 'success': True,
@@ -300,10 +323,37 @@ def create_app(config_name='default'):
             })
             
         except Exception as e:
+            logger.error(f"Error fetching models: {e}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             })
+    
+    @app.route('/api/debug_settings')
+    def api_debug_settings():
+        """Debug endpoint to check current settings"""
+        try:
+            settings = Settings.get_settings()
+            return jsonify({
+                'ollama_url': settings.ollama_url,
+                'ollama_model': settings.ollama_model,
+                'app_ollama_client_url': app.ollama_client.base_url if app.ollama_client else None
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)})
+    
+    @app.route('/api/reset_settings')
+    def api_reset_settings():
+        """Reset settings to environment variables"""
+        try:
+            settings = Settings.reset_settings()
+            return jsonify({
+                'success': True,
+                'message': 'Settings reset to environment variables',
+                'ollama_url': settings.ollama_url
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)})
     
     @app.route('/api/audio/<int:call_id>')
     def api_audio(call_id):
