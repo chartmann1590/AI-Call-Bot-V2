@@ -329,8 +329,8 @@ http {
         listen 80;
         server_name $DOMAIN;
         
-        # Redirect HTTP to HTTPS
-        return 301 https://\$server_name\$request_uri;
+        # Redirect HTTP to HTTPS - preserve original IP address
+        return 301 https://\$host\$request_uri;
     }
     
     server {
@@ -355,6 +355,56 @@ http {
         
         # Client max body size
         client_max_body_size 10M;
+        
+        # Static files
+        location /static/ {
+            alias /app/static/;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+        
+        # API endpoints with rate limiting
+        location /api/ {
+            limit_req zone=api burst=20 nodelay;
+            proxy_pass http://callbot_backend;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+        }
+        
+        # WebSocket support for real-time features
+        location /ws {
+            proxy_pass http://callbot_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+        }
+        
+        # Main application
+        location / {
+            proxy_pass http://callbot_backend;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+        }
+    }
+    
+    # Catch-all server block for IP-based access (no SSL)
+    server {
+        listen 80;
+        server_name _;
         
         # Static files
         location /static/ {
