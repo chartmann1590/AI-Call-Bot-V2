@@ -162,8 +162,7 @@ class SIPClient:
                 self.port, 
                 self.username, 
                 self.password,
-                callCallback=self._on_incoming_call,
-                myIP="0.0.0.0"
+                callCallback=self._on_incoming_call
             )
             logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
             logger.info(f"Phone object type: {type(self.phone)}")
