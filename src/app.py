@@ -25,7 +25,13 @@ logger = logging.getLogger(__name__)
 
 def create_app(config_name='default'):
     """Application factory"""
-    app = Flask(__name__, template_folder='templates', static_folder='static')
+    import os
+    # Get the absolute path to templates and static folders
+    # In Docker, the working directory is /app, and templates are at /app/templates
+    base_dir = os.getcwd()
+    template_dir = os.path.join(base_dir, 'templates')
+    static_dir = os.path.join(base_dir, 'static')
+    app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
     app.config.from_object(config[config_name])
     
     # Initialize extensions
