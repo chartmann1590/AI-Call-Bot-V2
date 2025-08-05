@@ -76,7 +76,8 @@ def create_app(config_name='default'):
                 logger.info("TTS manager initialized")
                 
                 # Initialize SIP client
-                logger.info(f"Initializing SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
+                logger.info(f"MAIN APP - Initializing SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
+                logger.info(f"MAIN APP - Settings from database: domain={settings.sip_domain}, username={settings.sip_username}, password={'*' * len(settings.sip_password) if settings.sip_password else 'None'}, port={settings.sip_port}")
                 app.sip_client = SIPClient(
                     domain=settings.sip_domain,
                     username=settings.sip_username,
@@ -311,10 +312,11 @@ def create_app(config_name='default'):
         """Test SIP connection"""
         try:
             settings = Settings.get_settings()
-            logger.info(f"Testing SIP connection to {settings.sip_domain}:{settings.sip_port}")
+            logger.info(f"TEST ENDPOINT - Testing SIP connection to {settings.sip_domain}:{settings.sip_port}")
+            logger.info(f"TEST ENDPOINT - Settings from database: domain={settings.sip_domain}, username={settings.sip_username}, password={'*' * len(settings.sip_password) if settings.sip_password else 'None'}, port={settings.sip_port}")
             
             # Create a test SIP client
-            logger.info("Creating test SIP client...")
+            logger.info("TEST ENDPOINT - Creating test SIP client...")
             test_sip_client = SIPClient(
                 domain=settings.sip_domain,
                 username=settings.sip_username,
@@ -408,6 +410,44 @@ def create_app(config_name='default'):
             
         except Exception as e:
             logger.error(f"Error in debug SIP: {e}")
+            return jsonify({'error': str(e)})
+    
+    @app.route('/api/compare_sip_settings')
+    def api_compare_sip_settings():
+        """Compare settings used by main app vs test endpoint"""
+        try:
+            settings = Settings.get_settings()
+            
+            comparison = {
+                'database_settings': {
+                    'domain': settings.sip_domain,
+                    'username': settings.sip_username,
+                    'password': '*' * len(settings.sip_password) if settings.sip_password else 'None',
+                    'port': settings.sip_port
+                },
+                'main_app_sip_client': None,
+                'test_endpoint_would_use': {
+                    'domain': settings.sip_domain,
+                    'username': settings.sip_username,
+                    'password': '*' * len(settings.sip_password) if settings.sip_password else 'None',
+                    'port': settings.sip_port
+                }
+            }
+            
+            if app.sip_client:
+                comparison['main_app_sip_client'] = {
+                    'domain': app.sip_client.domain,
+                    'username': app.sip_client.username,
+                    'password': '*' * len(app.sip_client.password) if app.sip_client.password else 'None',
+                    'port': app.sip_client.port,
+                    'registered': app.sip_client.is_registered()
+                }
+            
+            logger.info(f"Settings comparison: {comparison}")
+            return jsonify(comparison)
+            
+        except Exception as e:
+            logger.error(f"Error comparing settings: {e}")
             return jsonify({'error': str(e)})
     
     @app.route('/api/fetch_ollama_models', methods=['POST'])

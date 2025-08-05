@@ -56,6 +56,9 @@
                         <button type="button" class="btn btn-outline-warning" onclick="debugSIP()">
                             <i class="fas fa-bug me-1"></i>Debug SIP
                         </button>
+                        <button type="button" class="btn btn-outline-info" onclick="compareSettings()">
+                            <i class="fas fa-balance-scale me-1"></i>Compare Settings
+                        </button>
                     </div>
                 </div>
             </div>
@@ -440,6 +443,33 @@ function debugSIP() {
             $('#testResultsContent').html(`
                 <div class="alert alert-danger">
                     <i class="fas fa-times-circle me-2"></i>Failed to get SIP debug information
+                </div>
+            `);
+        });
+}
+
+function compareSettings() {
+    $('#testResultsContent').html(`
+        <div class="text-center">
+            <div class="spinner-border text-info" role="status">
+                <span class="visually-hidden">Comparing settings...</span>
+            </div>
+            <p class="mt-2">Comparing main app vs test endpoint settings...</p>
+        </div>
+    `);
+    $('#testResultsModal').modal('show');
+    
+    $.get('/api/compare_sip_settings')
+        .done(function(data) {
+            let compareHtml = '<h6>Settings Comparison:</h6><pre class="bg-light p-3">';
+            compareHtml += JSON.stringify(data, null, 2);
+            compareHtml += '</pre>';
+            $('#testResultsContent').html(compareHtml);
+        })
+        .fail(function() {
+            $('#testResultsContent').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>Failed to compare settings
                 </div>
             `);
         });
