@@ -62,6 +62,7 @@ def create_app(config_name='default'):
                 logger.info("Whisper transcriber initialized")
                 
                 # Initialize Ollama client
+                logger.info(f"Initializing Ollama client with URL: {settings.ollama_url}")
                 app.ollama_client = OllamaClient(settings.ollama_url)
                 logger.info("Ollama client initialized")
                 
@@ -373,14 +374,14 @@ def create_app(config_name='default'):
     def _generate_ai_response(self, call: Call, transcript: str):
         """Generate AI response for call"""
         try:
-            if not app.ollama_client:
+            if not self.ollama_client:
                 logger.error("Ollama client not available")
                 return
             
             settings = Settings.get_settings()
             
             # Generate AI response
-            ai_response = app.ollama_client.generate_with_context(
+            ai_response = self.ollama_client.generate_with_context(
                 transcript=transcript,
                 model=settings.ollama_model
             )
@@ -398,21 +399,21 @@ def create_app(config_name='default'):
     def _generate_tts_audio(self, call: Call, text: str):
         """Generate TTS audio for call"""
         try:
-            if not app.tts_manager:
+            if not self.tts_manager:
                 logger.error("TTS manager not available")
                 return
             
             settings = Settings.get_settings()
             
             # Create audio output directory
-            audio_dir = app.config.get('AUDIO_OUTPUT_DIR', 'audio_output')
+            audio_dir = self.config.get('AUDIO_OUTPUT_DIR', 'audio_output')
             os.makedirs(audio_dir, exist_ok=True)
             
             # Generate audio filename
             audio_filename = os.path.join(audio_dir, f"call_{call.id}_{int(time.time())}.wav")
             
             # Generate TTS audio
-            success = app.tts_manager.synthesize(
+            success = self.tts_manager.synthesize(
                 text=text,
                 engine_name=settings.tts_engine,
                 voice=settings.tts_voice,
@@ -425,11 +426,11 @@ def create_app(config_name='default'):
                 db.session.commit()
                 
                 # Play audio to call
-                if app.sip_client and hasattr(self, '_call_mapping'):
+                if self.sip_client and hasattr(self, '_call_mapping'):
                     # Find call ID from database ID
                     for sip_call_id, db_call_id in self._call_mapping.items():
                         if db_call_id == call.id:
-                            app.sip_client.play_audio(sip_call_id, audio_filename)
+                            self.sip_client.play_audio(sip_call_id, audio_filename)
                             break
                 
                 logger.info(f"TTS audio generated: {audio_filename}")

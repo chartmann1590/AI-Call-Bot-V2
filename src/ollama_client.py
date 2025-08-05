@@ -16,7 +16,19 @@ class OllamaClient:
         Args:
             base_url: Base URL of Ollama server
         """
+        # Ensure base_url is properly formatted
+        if not base_url:
+            base_url = 'http://localhost:11434'
+        
+        # Remove trailing slash and ensure proper URL format
         self.base_url = base_url.rstrip('/')
+        
+        # Validate URL format
+        if not self.base_url.startswith(('http://', 'https://')):
+            self.base_url = f'http://{self.base_url}'
+        
+        logger.info(f"Initializing Ollama client with URL: {self.base_url}")
+        
         self.session = requests.Session()
         self.session.headers.update({
             'Content-Type': 'application/json',
@@ -38,6 +50,8 @@ class OllamaClient:
         url = urljoin(self.base_url, endpoint)
         
         try:
+            logger.debug(f"Making {method} request to: {url}")
+            
             if method.upper() == 'GET':
                 response = self.session.get(url, timeout=30)
             elif method.upper() == 'POST':
@@ -49,11 +63,17 @@ class OllamaClient:
             response.raise_for_status()
             return response.json()
             
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection failed to {url}: {e}")
+            return None
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Request timeout to {url}: {e}")
+            return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
+            logger.error(f"Request failed to {url}: {e}")
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {e}")
+            logger.error(f"Failed to parse JSON response from {url}: {e}")
             return None
     
     def generate_response(self, prompt: str, model: str, 
@@ -136,9 +156,17 @@ class OllamaClient:
             True if server is running, False otherwise
         """
         try:
-            response = self.session.get(f"{self.base_url}/api/tags", timeout=5)
-            return response.status_code == 200
-        except requests.exceptions.RequestException:
+            url = f"{self.base_url}/api/tags"
+            logger.debug(f"Checking server status at: {url}")
+            response = self.session.get(url, timeout=5)
+            if response.status_code == 200:
+                logger.debug(f"Server status check successful: {response.status_code}")
+                return True
+            else:
+                logger.warning(f"Server status check failed with status code: {response.status_code}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Server status check failed: {e}")
             return False
     
     def test_connection(self) -> Dict[str, Any]:
@@ -151,26 +179,34 @@ class OllamaClient:
         status = {
             'connected': False,
             'models': [],
-            'error': None
+            'error': None,
+            'url': self.base_url
         }
         
         try:
+            logger.info(f"Testing connection to Ollama server at: {self.base_url}")
+            
             # Check if server is running
             if not self.check_server_status():
-                status['error'] = 'Server not reachable'
+                status['error'] = f'Server not reachable at {self.base_url}'
+                logger.error(f"Ollama server not reachable at {self.base_url}")
                 return status
             
             status['connected'] = True
+            logger.info(f"Successfully connected to Ollama server at {self.base_url}")
             
             # Get available models
             models = self.list_models()
             if models:
                 status['models'] = models
+                logger.info(f"Found {len(models)} models: {', '.join(models)}")
             else:
                 status['error'] = 'Failed to retrieve models'
+                logger.error("Failed to retrieve models from Ollama server")
             
         except Exception as e:
             status['error'] = str(e)
+            logger.error(f"Exception during connection test: {e}")
         
         return status
     
