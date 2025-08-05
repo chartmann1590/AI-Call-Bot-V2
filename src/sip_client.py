@@ -137,11 +137,12 @@ class CallHandler:
 class SIPClient:
     """Main SIP client for handling VoIP calls"""
     
-    def __init__(self, domain: str, username: str, password: str, port: int = 5060):
+    def __init__(self, domain: str, username: str, password: str, port: int = 5060, local_port: int = None):
         self.domain = domain
         self.username = username
         self.password = password
         self.port = port
+        self.local_port = local_port or self._find_available_port()
         self.registered = False
         self.active_calls = {}
         self.on_incoming_call = None
@@ -151,21 +152,36 @@ class SIPClient:
         # Initialize SIP
         self._init_sip()
     
+    def _find_available_port(self) -> int:
+        """Find an available port for SIP client"""
+        import socket
+        for port in range(5060, 5080):  # Try ports 5060-5079
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.bind(('0.0.0.0', port))
+                    logger.info(f"Found available port: {port}")
+                    return port
+            except OSError:
+                continue
+        logger.warning("No available ports found in range 5060-5079, using 5060")
+        return 5060
+    
     def _init_sip(self):
         """Initialize REAL pyVoIP library"""
         try:
-            logger.info(f"Initializing pyVoIP with domain={self.domain}, port={self.port}, username={self.username}")
+            logger.info(f"Initializing pyVoIP with domain={self.domain}, port={self.port}, local_port={self.local_port}, username={self.username}")
             
-            # Initialize pyVoIP phone
+            # Initialize pyVoIP phone with local port
             self.phone = VoIPPhone(
                 self.domain, 
                 self.port, 
                 self.username, 
                 self.password,
                 callCallback=self._on_incoming_call,
-                myIP="0.0.0.0"
+                myIP="0.0.0.0",
+                myPort=self.local_port
             )
-            logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
+            logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain} on local port {self.local_port}")
             logger.info(f"Phone object type: {type(self.phone)}")
             logger.info(f"Phone object attributes: {dir(self.phone)}")
             
@@ -211,6 +227,25 @@ class SIPClient:
         except Exception as e:
             logger.error(f"Real pyVoIP registration failed for {self.username}@{self.domain}: {e}")
             logger.error(f"Exception type: {type(e)}")
+            
+            # Handle specific port binding errors
+            if "Address already in use" in str(e) or "Errno 98" in str(e):
+                logger.error("Port binding error - trying to find another available port")
+                try:
+                    # Try to find another available port
+                    old_local_port = self.local_port
+                    self.local_port = self._find_available_port()
+                    if self.local_port != old_local_port:
+                        logger.info(f"Retrying with new local port: {self.local_port}")
+                        # Reinitialize with new port
+                        self._init_sip()
+                        self.phone.start()
+                        self.registered = True
+                        logger.info(f"Registration successful with new port {self.local_port}")
+                        return True
+                except Exception as retry_e:
+                    logger.error(f"Retry with new port also failed: {retry_e}")
+            
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             self.registered = False
@@ -352,6 +387,7 @@ class SIPClient:
             'domain': self.domain,
             'username': self.username,
             'port': self.port,
+            'local_port': self.local_port,
             'active_calls': len(self.active_calls)
         }
     
