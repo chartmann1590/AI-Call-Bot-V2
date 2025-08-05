@@ -163,7 +163,7 @@ class SIPClient:
                 callCallback=self._on_incoming_call,
                 myIP="0.0.0.0"
             )
-            logger.info("Real pyVoIP library initialized successfully")
+            logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
             
         except Exception as e:
             logger.error(f"Failed to initialize pyVoIP: {e}")
@@ -180,17 +180,20 @@ class SIPClient:
             logger.error(f"Failed to create pyVoIP account: {e}")
             raise
     
-    async def register(self) -> bool:
+    def register(self) -> bool:
         """Register with REAL SIP server using pyVoIP"""
         try:
+            logger.info(f"Attempting to register with SIP server {self.domain}:{self.port}")
+            
             # Start pyVoIP phone
             self.phone.start()
             self.registered = True
-            logger.info("Real pyVoIP registration successful")
+            logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain}")
             return True
             
         except Exception as e:
-            logger.error(f"Real pyVoIP registration failed: {e}")
+            logger.error(f"Real pyVoIP registration failed for {self.username}@{self.domain}: {e}")
+            self.registered = False
             return False
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
@@ -318,12 +321,27 @@ class SIPClient:
         return {call_id: self.get_call_info(call_id) 
                 for call_id in self.active_calls.keys()}
     
+    def is_registered(self) -> bool:
+        """Check if SIP client is registered"""
+        return self.registered
+    
+    def get_registration_status(self) -> Dict[str, Any]:
+        """Get registration status information"""
+        return {
+            'registered': self.registered,
+            'domain': self.domain,
+            'username': self.username,
+            'port': self.port,
+            'active_calls': len(self.active_calls)
+        }
+    
     def shutdown(self):
         """Shutdown REAL pyVoIP client"""
         try:
             # Cleanup pyVoIP resources
             if hasattr(self, 'phone'):
                 self.phone.stop()
+            self.registered = False
             logger.info("Real pyVoIP client shutdown complete")
         except Exception as e:
             logger.error(f"Error during pyVoIP shutdown: {e}")

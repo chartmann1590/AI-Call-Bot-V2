@@ -86,6 +86,9 @@
                     <button class="btn btn-outline-success" onclick="testOllama()">
                         <i class="fas fa-brain me-2"></i>Test AI Connection
                     </button>
+                    <button class="btn btn-outline-info" onclick="testSIP()">
+                        <i class="fas fa-phone me-2"></i>Test SIP Connection
+                    </button>
                 </div>
             </div>
         </div>
@@ -161,6 +164,23 @@ $(document).ready(function() {
 });
 
 function updateSystemStatus() {
+    // Test SIP connection
+    $('#sip-spinner').removeClass('d-none');
+    $.get('/api/sip_status')
+        .done(function(data) {
+            if (data.connected) {
+                $('#sip-status').html('<span class="text-success">Registered</span>');
+            } else {
+                $('#sip-status').html('<span class="text-danger">Not Registered</span>');
+            }
+        })
+        .fail(function() {
+            $('#sip-status').html('<span class="text-danger">Error</span>');
+        })
+        .always(function() {
+            $('#sip-spinner').addClass('d-none');
+        });
+    
     // Test Ollama connection
     $('#ollama-spinner').removeClass('d-none');
     $.get('/api/test_ollama')
@@ -242,6 +262,24 @@ function testOllama() {
         })
         .always(function() {
             $('#ollama-spinner').addClass('d-none');
+        });
+}
+
+function testSIP() {
+    $('#sip-spinner').removeClass('d-none');
+    $.get('/api/test_sip')
+        .done(function(data) {
+            if (data.connected) {
+                alert('SIP connection successful! Registered with ' + data.domain);
+            } else {
+                alert('SIP connection failed: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .fail(function() {
+            alert('Failed to test SIP connection');
+        })
+        .always(function() {
+            $('#sip-spinner').addClass('d-none');
         });
 }
 </script>

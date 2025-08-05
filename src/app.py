@@ -298,6 +298,69 @@ def create_app(config_name='default'):
             logger.error(f"Error testing Ollama connection: {e}")
             return jsonify({'connected': False, 'error': str(e), 'url': settings.ollama_url if 'settings' in locals() else 'unknown'})
     
+    @app.route('/api/test_sip')
+    def api_test_sip():
+        """Test SIP connection"""
+        try:
+            settings = Settings.get_settings()
+            logger.info(f"Testing SIP connection to {settings.sip_domain}:{settings.sip_port}")
+            
+            # Create a test SIP client
+            test_sip_client = SIPClient(
+                domain=settings.sip_domain,
+                username=settings.sip_username,
+                password=settings.sip_password,
+                port=settings.sip_port
+            )
+            
+            # Try to register
+            if test_sip_client.register():
+                test_sip_client.shutdown()
+                return jsonify({
+                    'connected': True,
+                    'message': f'Successfully registered with SIP server {settings.sip_domain}',
+                    'domain': settings.sip_domain,
+                    'username': settings.sip_username
+                })
+            else:
+                test_sip_client.shutdown()
+                return jsonify({
+                    'connected': False,
+                    'error': 'Failed to register with SIP server',
+                    'domain': settings.sip_domain,
+                    'username': settings.sip_username
+                })
+                
+        except Exception as e:
+            logger.error(f"Error testing SIP connection: {e}")
+            return jsonify({
+                'connected': False,
+                'error': str(e),
+                'domain': settings.sip_domain if 'settings' in locals() else 'unknown'
+            })
+    
+    @app.route('/api/sip_status')
+    def api_sip_status():
+        """Get current SIP registration status"""
+        try:
+            if app.sip_client:
+                status = app.sip_client.get_registration_status()
+                return jsonify({
+                    'connected': status['registered'],
+                    'status': status
+                })
+            else:
+                return jsonify({
+                    'connected': False,
+                    'error': 'SIP client not initialized'
+                })
+        except Exception as e:
+            logger.error(f"Error getting SIP status: {e}")
+            return jsonify({
+                'connected': False,
+                'error': str(e)
+            })
+    
     @app.route('/api/fetch_ollama_models', methods=['POST'])
     def api_fetch_ollama_models():
         """Fetch available models from Ollama server"""

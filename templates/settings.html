@@ -372,14 +372,45 @@ function testSIPConnection() {
         return;
     }
     
-    // For now, just show a message since we can't test SIP without actual server
+    // Show loading state
     $('#testResultsContent').html(`
-        <div class="alert alert-info">
-            <i class="fas fa-info-circle me-2"></i>SIP connection testing requires a running SIP server.
-            <br><small>The connection will be tested when the application starts.</small>
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Testing SIP connection...</span>
+            </div>
+            <p class="mt-2">Testing SIP connection to ${domain}...</p>
         </div>
     `);
     $('#testResultsModal').modal('show');
+    
+    // Test SIP connection
+    $.get('/api/test_sip')
+        .done(function(data) {
+            let resultHtml = '';
+            if (data.connected) {
+                resultHtml = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>${data.message}
+                        <br><small>Domain: ${data.domain}, Username: ${data.username}</small>
+                    </div>
+                `;
+            } else {
+                resultHtml = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-times-circle me-2"></i>Connection failed: ${data.error}
+                        <br><small>Domain: ${data.domain}, Username: ${data.username}</small>
+                    </div>
+                `;
+            }
+            $('#testResultsContent').html(resultHtml);
+        })
+        .fail(function() {
+            $('#testResultsContent').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>Failed to test SIP connection
+                </div>
+            `);
+        });
 }
 
 function testTTS() {
