@@ -89,9 +89,9 @@ def create_app(config_name='default'):
                 # Set SIP callbacks
                 logger.info("Setting SIP callbacks...")
                 app.sip_client.set_callbacks(
-                    on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
-                    on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
-                    on_call_end=lambda call_id: app._handle_call_end(call_id)
+                    on_incoming_call=app._handle_incoming_call,
+                    on_call_transcript=app._handle_call_transcript,
+                    on_call_end=app._handle_call_end
                 )
                 logger.info("SIP callbacks set successfully")
                 
@@ -216,9 +216,9 @@ def create_app(config_name='default'):
                             )
                             
                             app.sip_client.set_callbacks(
-                                on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
-                                on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
-                                on_call_end=lambda call_id: app._handle_call_end(call_id)
+                                on_incoming_call=app._handle_incoming_call,
+                                on_call_transcript=app._handle_call_transcript,
+                                on_call_end=app._handle_call_end
                             )
                             
                             if app.sip_client.register():
@@ -519,7 +519,7 @@ def create_app(config_name='default'):
         return jsonify({'error': 'Audio file not found'}), 404
     
     # Call handling methods
-    def _handle_incoming_call(self, call_id: str, caller_id: str):
+    def _handle_incoming_call(call_id: str, caller_id: str):
         """Handle incoming call"""
         logger.info(f"Handling incoming call {call_id} from {caller_id}")
         
@@ -532,17 +532,17 @@ def create_app(config_name='default'):
         db.session.commit()
         
         # Store call ID mapping
-        if not hasattr(self, '_call_mapping'):
-            self._call_mapping = {}
-        self._call_mapping[call_id] = call.id
+        if not hasattr(app, '_call_mapping'):
+            app._call_mapping = {}
+        app._call_mapping[call_id] = call.id
     
-    def _handle_call_transcript(self, call_id: str, transcript: str):
+    def _handle_call_transcript(call_id: str, transcript: str):
         """Handle transcript from call"""
         logger.info(f"Call {call_id} transcript: {transcript}")
         
         # Get call record
-        if hasattr(self, '_call_mapping') and call_id in self._call_mapping:
-            call_id_db = self._call_mapping[call_id]
+        if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
+            call_id_db = app._call_mapping[call_id]
             call = Call.query.get(call_id_db)
             
             if call:
@@ -555,15 +555,15 @@ def create_app(config_name='default'):
                 db.session.commit()
                 
                 # Generate AI response
-                self._generate_ai_response(call, transcript)
+                app._generate_ai_response(call, transcript)
     
-    def _handle_call_end(self, call_id: str):
+    def _handle_call_end(call_id: str):
         """Handle call end"""
         logger.info(f"Call {call_id} ended")
         
         # Get call record
-        if hasattr(self, '_call_mapping') and call_id in self._call_mapping:
-            call_id_db = self._call_mapping[call_id]
+        if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
+            call_id_db = app._call_mapping[call_id]
             call = Call.query.get(call_id_db)
             
             if call:
@@ -572,7 +572,7 @@ def create_app(config_name='default'):
                 db.session.commit()
                 
                 # Clean up mapping
-                del self._call_mapping[call_id]
+                del app._call_mapping[call_id]
     
     def _generate_ai_response(self, call: Call, transcript: str):
         """Generate AI response for call"""
