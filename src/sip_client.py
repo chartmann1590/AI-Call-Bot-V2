@@ -263,11 +263,52 @@ class SIPClient:
         else:
             current_local_port = self.local_port
         
+        # Get local IP address for pyVoIP
+        try:
+            import socket
+            # Method 1: Try to connect to external service to get local IP
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                sip_logger.info(f"📱 Detected local IP (method 1): {local_ip}")
+            except Exception as e1:
+                sip_logger.warning(f"⚠️ Method 1 failed: {e1}")
+                
+                # Method 2: Try to get IP from hostname
+                try:
+                    local_ip = socket.gethostbyname(socket.gethostname())
+                    sip_logger.info(f"📱 Detected local IP (method 2): {local_ip}")
+                except Exception as e2:
+                    sip_logger.warning(f"⚠️ Method 2 failed: {e2}")
+                    
+                    # Method 3: Try to get IP from network interfaces
+                    try:
+                        import subprocess
+                        result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            local_ip = result.stdout.strip().split()[0]
+                            sip_logger.info(f"📱 Detected local IP (method 3): {local_ip}")
+                        else:
+                            raise Exception("hostname -I failed")
+                    except Exception as e3:
+                        sip_logger.warning(f"⚠️ Method 3 failed: {e3}")
+                        
+                        # Fallback to default
+                        local_ip = "0.0.0.0"
+                        sip_logger.info(f"📱 Using fallback IP: {local_ip}")
+                        
+        except Exception as e:
+            sip_logger.warning(f"⚠️ Could not detect local IP, using default: {e}")
+            local_ip = "0.0.0.0"  # Fallback to all interfaces
+        
         for attempt in range(max_attempts):
             try:
                 sip_logger.info(f"🔄 Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP")
                 sip_logger.info(f"📱 Domain: {self.domain}:{self.port}, Local port: {current_local_port}")
                 sip_logger.info(f"📱 Username: {self.username}, Password: {'*' * len(self.password)}")
+                sip_logger.info(f"📱 Local IP: {local_ip}")
                 
                 # Ensure all parameters are valid strings/ints before passing to pyVoIP
                 server = str(self.domain).strip()
@@ -287,7 +328,7 @@ class SIPClient:
                     username=username,
                     password=password,
                     callCallback=self._on_incoming_call,
-                    myIP=None,  # Let pyVoIP detect the IP
+                    myIP=local_ip,  # Use detected local IP instead of None
                     sipPort=sip_port,
                     rtpPortLow=10000,
                     rtpPortHigh=20000
