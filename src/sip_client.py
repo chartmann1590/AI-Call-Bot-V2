@@ -162,11 +162,12 @@ class CallHandler:
 class SIPClient:
     """Main SIP client for handling VoIP calls"""
     
-    def __init__(self, domain: str, username: str, password: str, port: int = 5060):
+    def __init__(self, domain: str, username: str, password: str, port: int = 5060, local_port: int = None):
         self.domain = domain
         self.username = username
         self.password = password
-        self.port = port
+        self.port = port  # PBX port (remote)
+        self.local_port = local_port  # Local binding port (can be None for auto-selection)
         self.registered = False
         self.active_calls = {}
         self.on_incoming_call = None
@@ -179,24 +180,30 @@ class SIPClient:
     def _init_sip(self):
         """Initialize REAL pyVoIP library with robust port handling"""
         max_attempts = 15  # Increased attempts
-        current_port = self.port
+        
+        # Start with a different local port range to avoid conflicts
+        if self.local_port is None:
+            current_local_port = find_available_port(5070, max_attempts=5)  # Start from 5070 for local binding
+        else:
+            current_local_port = self.local_port
         
         for attempt in range(max_attempts):
             try:
-                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP with domain={self.domain}, port={current_port}, username={self.username}")
+                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP with domain={self.domain}, pbx_port={self.port}, local_port={current_local_port}, username={self.username}")
                 
-                # Initialize pyVoIP phone
+                # Initialize pyVoIP phone with separate PBX and local ports
                 self.phone = VoIPPhone(
-                    self.domain, 
-                    current_port, 
+                    f"{self.domain}:{self.port}",  # PBX address with port
+                    current_local_port,  # Local binding port
                     self.username, 
                     self.password,
                     callCallback=self._on_incoming_call
                 )
                 
-                # Update the port to the successfully used port
-                self.port = current_port
-                logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain} on port {self.port}")
+                # Update the local port to the successfully used port
+                self.local_port = current_local_port
+                logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
+                logger.info(f"PBX Port: {self.port}, Local Port: {self.local_port}")
                 logger.info(f"Phone object type: {type(self.phone)}")
                 return  # Success, exit the loop
                 
@@ -206,20 +213,20 @@ class SIPClient:
                 
                 # Check if it's a port binding error
                 if "Address already in use" in str(e) or "Errno 98" in str(e):
-                    logger.warning(f"Port {current_port} is in use, trying to find available port...")
+                    logger.warning(f"Local port {current_local_port} is in use, trying to find available port...")
                     try:
-                        # Find an available port starting from current_port + 1
-                        current_port = find_available_port(current_port + 1, max_attempts=5)
-                        logger.info(f"Found available port: {current_port}")
-                        continue  # Try again with the new port
+                        # Find an available port starting from current_local_port + 1
+                        current_local_port = find_available_port(current_local_port + 1, max_attempts=5)
+                        logger.info(f"Found available local port: {current_local_port}")
+                        continue  # Try again with the new local port
                     except RuntimeError as port_error:
-                        logger.error(f"Could not find available port: {port_error}")
+                        logger.error(f"Could not find available local port: {port_error}")
                         # Try completely different port ranges
                         if attempt < 5:
-                            current_port = 5060 + (attempt * 20)  # Try ports 5060, 5080, 5100, etc.
+                            current_local_port = 5070 + (attempt * 20)  # Try ports 5070, 5090, 5110, etc.
                         else:
-                            current_port = 6000 + (attempt * 10)  # Try higher port range
-                        logger.info(f"Trying alternative port range: {current_port}")
+                            current_local_port = 6000 + (attempt * 10)  # Try higher port range
+                        logger.info(f"Trying alternative local port range: {current_local_port}")
                         continue
                 else:
                     # Non-port related error, log and continue
@@ -228,7 +235,7 @@ class SIPClient:
                         import traceback
                         logger.error(f"Final attempt failed. Traceback: {traceback.format_exc()}")
                         raise
-                    current_port += 1
+                    current_local_port += 1
                     continue
         
         # If we get here, all attempts failed
@@ -248,11 +255,11 @@ class SIPClient:
     def register(self) -> bool:
         """Register with REAL SIP server using pyVoIP"""
         max_attempts = 10
-        current_port = self.port
+        current_local_port = self.local_port
         
         for attempt in range(max_attempts):
             try:
-                logger.info(f"Registration attempt {attempt + 1}/{max_attempts}: Trying to register with SIP server {self.domain}:{current_port}")
+                logger.info(f"Registration attempt {attempt + 1}/{max_attempts}: Trying to register with SIP server {self.domain}:{self.port} using local port {current_local_port}")
                 
                 if not hasattr(self, 'phone') or self.phone is None:
                     logger.error("Phone object not initialized!")
@@ -264,7 +271,8 @@ class SIPClient:
                 logger.info("phone.start() completed successfully")
                 
                 self.registered = True
-                logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain} on port {current_port}")
+                logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain}")
+                logger.info(f"PBX Port: {self.port}, Local Port: {current_local_port}")
                 logger.info(f"Registration status: {self.registered}")
                 return True
                 
@@ -274,46 +282,46 @@ class SIPClient:
                 
                 # Handle port binding errors
                 if "Address already in use" in str(e) or "Errno 98" in str(e):
-                    logger.warning(f"Port {current_port} is in use, trying to find available port...")
+                    logger.warning(f"Local port {current_local_port} is in use, trying to find available port...")
                     try:
                         # Find an available port
-                        new_port = find_available_port(current_port + 1, max_attempts=5)
-                        logger.info(f"Found available port: {new_port}")
+                        new_local_port = find_available_port(current_local_port + 1, max_attempts=5)
+                        logger.info(f"Found available local port: {new_local_port}")
                         
-                        # Reinitialize the phone with the new port
+                        # Reinitialize the phone with the new local port
                         self.phone = VoIPPhone(
-                            self.domain, 
-                            new_port, 
+                            f"{self.domain}:{self.port}",  # PBX address with port
+                            new_local_port,  # Local binding port
                             self.username, 
                             self.password,
                             callCallback=self._on_incoming_call
                         )
-                        self.port = new_port
-                        current_port = new_port
-                        logger.info(f"Reinitialized phone with port {new_port}")
-                        continue  # Try registration again with new port
+                        self.local_port = new_local_port
+                        current_local_port = new_local_port
+                        logger.info(f"Reinitialized phone with local port {new_local_port}")
+                        continue  # Try registration again with new local port
                         
                     except RuntimeError as port_error:
-                        logger.error(f"Could not find available port: {port_error}")
+                        logger.error(f"Could not find available local port: {port_error}")
                         # Try a completely different port range
-                        current_port = 5060 + (attempt * 20)  # Try ports 5060, 5080, 5100, etc.
-                        logger.info(f"Trying alternative port range: {current_port}")
+                        current_local_port = 5070 + (attempt * 20)  # Try ports 5070, 5090, 5110, etc.
+                        logger.info(f"Trying alternative local port range: {current_local_port}")
                         
                         try:
-                            # Reinitialize with completely different port
+                            # Reinitialize with completely different local port
                             self.phone = VoIPPhone(
-                                self.domain, 
-                                current_port, 
+                                f"{self.domain}:{self.port}",  # PBX address with port
+                                current_local_port,  # Local binding port
                                 self.username, 
                                 self.password,
                                 callCallback=self._on_incoming_call
                             )
-                            self.port = current_port
-                            logger.info(f"Reinitialized phone with alternative port {current_port}")
+                            self.local_port = current_local_port
+                            logger.info(f"Reinitialized phone with alternative local port {current_local_port}")
                             continue  # Try registration again
                         except Exception as reinit_e:
-                            logger.error(f"Failed to reinitialize with alternative port {current_port}: {reinit_e}")
-                            current_port += 1
+                            logger.error(f"Failed to reinitialize with alternative local port {current_local_port}: {reinit_e}")
+                            current_local_port += 1
                             continue
                 else:
                     # Non-port related error
@@ -323,7 +331,7 @@ class SIPClient:
                         logger.error(f"Final registration attempt failed. Traceback: {traceback.format_exc()}")
                         self.registered = False
                         return False
-                    current_port += 1
+                    current_local_port += 1
                     continue
         
         # If we get here, all attempts failed
@@ -466,7 +474,8 @@ class SIPClient:
             'registered': self.registered,
             'domain': self.domain,
             'username': self.username,
-            'port': self.port,
+            'pbx_port': self.port,
+            'local_port': self.local_port,
             'active_calls': len(self.active_calls)
         }
     
