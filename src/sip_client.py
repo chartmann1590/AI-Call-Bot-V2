@@ -16,7 +16,7 @@ SIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
 
-def find_available_port(start_port: int, max_attempts: int = 10) -> int:
+def find_available_port(start_port: int, max_attempts: int = 20) -> int:
     """Find an available port starting from start_port"""
     for i in range(max_attempts):
         port = start_port + i
@@ -28,7 +28,20 @@ def find_available_port(start_port: int, max_attempts: int = 10) -> int:
         except OSError:
             logger.debug(f"Port {port} is in use, trying next...")
             continue
-    raise RuntimeError(f"Could not find available port starting from {start_port}")
+    
+    # If we can't find a port in the sequential range, try random ports
+    import random
+    for i in range(10):
+        port = random.randint(10000, 65000)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', port))
+                logger.info(f"Found available random port: {port}")
+                return port
+        except OSError:
+            continue
+    
+    raise RuntimeError(f"Could not find available port starting from {start_port} or in random range")
 
 class AudioRecorder:
     """Handles audio recording and processing"""
@@ -165,7 +178,7 @@ class SIPClient:
     
     def _init_sip(self):
         """Initialize REAL pyVoIP library with robust port handling"""
-        max_attempts = 5
+        max_attempts = 15  # Increased attempts
         current_port = self.port
         
         for attempt in range(max_attempts):
@@ -196,13 +209,16 @@ class SIPClient:
                     logger.warning(f"Port {current_port} is in use, trying to find available port...")
                     try:
                         # Find an available port starting from current_port + 1
-                        current_port = find_available_port(current_port + 1, max_attempts=3)
+                        current_port = find_available_port(current_port + 1, max_attempts=5)
                         logger.info(f"Found available port: {current_port}")
                         continue  # Try again with the new port
                     except RuntimeError as port_error:
                         logger.error(f"Could not find available port: {port_error}")
-                        # Try a completely different port range
-                        current_port = 5060 + (attempt * 10)  # Try ports 5060, 5070, 5080, etc.
+                        # Try completely different port ranges
+                        if attempt < 5:
+                            current_port = 5060 + (attempt * 20)  # Try ports 5060, 5080, 5100, etc.
+                        else:
+                            current_port = 6000 + (attempt * 10)  # Try higher port range
                         logger.info(f"Trying alternative port range: {current_port}")
                         continue
                 else:
@@ -231,66 +247,89 @@ class SIPClient:
     
     def register(self) -> bool:
         """Register with REAL SIP server using pyVoIP"""
-        try:
-            logger.info(f"Attempting to register with SIP server {self.domain}:{self.port}")
-            logger.info(f"Phone object exists: {hasattr(self, 'phone')}")
-            logger.info(f"Phone object: {self.phone}")
-            
-            if not hasattr(self, 'phone') or self.phone is None:
-                logger.error("Phone object not initialized!")
-                return False
-            
-            # Start pyVoIP phone
-            logger.info("Calling phone.start()...")
-            self.phone.start()
-            logger.info("phone.start() completed successfully")
-            
-            self.registered = True
-            logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain} on port {self.port}")
-            logger.info(f"Registration status: {self.registered}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Real pyVoIP registration failed for {self.username}@{self.domain}: {e}")
-            logger.error(f"Exception type: {type(e)}")
-            
-            # Handle specific port binding errors
-            if "Address already in use" in str(e) or "Errno 98" in str(e):
-                logger.error("Port binding error during registration - trying to reinitialize with new port")
-                try:
-                    # Try to reinitialize with a new port
-                    new_port = find_available_port(self.port + 1, max_attempts=5)
-                    logger.info(f"Reinitializing with new port: {new_port}")
-                    
-                    # Reinitialize the phone with the new port
-                    self.phone = VoIPPhone(
-                        self.domain, 
-                        new_port, 
-                        self.username, 
-                        self.password,
-                        callCallback=self._on_incoming_call
-                    )
-                    self.port = new_port
-                    
-                    # Try to start again
-                    self.phone.start()
-                    self.registered = True
-                    logger.info(f"Registration successful with new port {self.port}")
-                    return True
-                    
-                except Exception as retry_e:
-                    logger.error(f"Reinitialization with new port also failed: {retry_e}")
-                    # As a last resort, mark as registered anyway
-                    # The phone might still work for incoming calls even if registration fails
-                    self.registered = True
-                    logger.warning("Marking as registered despite registration failure - phone may still work for incoming calls")
-                    return True
-            
-            # For non-port related errors, don't mark as registered
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            self.registered = False
-            return False
+        max_attempts = 10
+        current_port = self.port
+        
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"Registration attempt {attempt + 1}/{max_attempts}: Trying to register with SIP server {self.domain}:{current_port}")
+                
+                if not hasattr(self, 'phone') or self.phone is None:
+                    logger.error("Phone object not initialized!")
+                    return False
+                
+                # Start pyVoIP phone
+                logger.info("Calling phone.start()...")
+                self.phone.start()
+                logger.info("phone.start() completed successfully")
+                
+                self.registered = True
+                logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain} on port {current_port}")
+                logger.info(f"Registration status: {self.registered}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Registration attempt {attempt + 1} failed: {e}")
+                logger.error(f"Exception type: {type(e)}")
+                
+                # Handle port binding errors
+                if "Address already in use" in str(e) or "Errno 98" in str(e):
+                    logger.warning(f"Port {current_port} is in use, trying to find available port...")
+                    try:
+                        # Find an available port
+                        new_port = find_available_port(current_port + 1, max_attempts=5)
+                        logger.info(f"Found available port: {new_port}")
+                        
+                        # Reinitialize the phone with the new port
+                        self.phone = VoIPPhone(
+                            self.domain, 
+                            new_port, 
+                            self.username, 
+                            self.password,
+                            callCallback=self._on_incoming_call
+                        )
+                        self.port = new_port
+                        current_port = new_port
+                        logger.info(f"Reinitialized phone with port {new_port}")
+                        continue  # Try registration again with new port
+                        
+                    except RuntimeError as port_error:
+                        logger.error(f"Could not find available port: {port_error}")
+                        # Try a completely different port range
+                        current_port = 5060 + (attempt * 20)  # Try ports 5060, 5080, 5100, etc.
+                        logger.info(f"Trying alternative port range: {current_port}")
+                        
+                        try:
+                            # Reinitialize with completely different port
+                            self.phone = VoIPPhone(
+                                self.domain, 
+                                current_port, 
+                                self.username, 
+                                self.password,
+                                callCallback=self._on_incoming_call
+                            )
+                            self.port = current_port
+                            logger.info(f"Reinitialized phone with alternative port {current_port}")
+                            continue  # Try registration again
+                        except Exception as reinit_e:
+                            logger.error(f"Failed to reinitialize with alternative port {current_port}: {reinit_e}")
+                            current_port += 1
+                            continue
+                else:
+                    # Non-port related error
+                    logger.error(f"Non-port related error: {e}")
+                    if attempt == max_attempts - 1:  # Last attempt
+                        import traceback
+                        logger.error(f"Final registration attempt failed. Traceback: {traceback.format_exc()}")
+                        self.registered = False
+                        return False
+                    current_port += 1
+                    continue
+        
+        # If we get here, all attempts failed
+        logger.error(f"Failed to register after {max_attempts} attempts")
+        self.registered = False
+        return False
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
                      on_call_transcript: Callable[[str, str], None],
