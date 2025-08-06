@@ -493,7 +493,7 @@ services:
       - FLASK_ENV=production
       - SECRET_KEY=\${SECRET_KEY:-your-secret-key-change-in-production}
       - DATABASE_URL=\${DATABASE_URL:-sqlite:///callbot.db}
-      - SIP_DOMAIN=\${SIP_DOMAIN:-pbx.example.com}
+      - SIP_DOMAIN=\${SIP_DOMAIN:-your-sip-server.com}
       - SIP_USERNAME=\${SIP_USERNAME:-1001}
       - SIP_PASSWORD=\${SIP_PASSWORD:-password}
       # Ollama configuration - supports both remote and local

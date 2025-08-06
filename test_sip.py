@@ -11,7 +11,9 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.sip_client import SIPClient
+from src.models import Settings, db
 from src.config import config
+from flask import Flask
 
 # Configure logging
 logging.basicConfig(
@@ -20,47 +22,57 @@ logging.basicConfig(
 )
 
 def test_sip_client():
-    """Test SIP client initialization and registration"""
+    """Test SIP client initialization and registration using database settings"""
     
-    # Test configuration
-    test_config = {
-        'domain': 'pbx.example.com',
-        'username': 'test_user',
-        'password': 'test_password',
-        'port': 5060
-    }
+    # Create Flask app context to access database
+    app = Flask(__name__)
+    app.config.from_object(config['default'])
+    db.init_app(app)
     
-    print("Testing SIP client initialization...")
-    
-    try:
-        # Initialize SIP client
-        sip_client = SIPClient(
-            domain=test_config['domain'],
-            username=test_config['username'],
-            password=test_config['password'],
-            port=test_config['port']
-        )
+    with app.app_context():
+        # Get settings from database
+        settings = Settings.get_settings()
         
-        print("✓ SIP client initialized successfully")
+        # Check if SIP settings are configured
+        if not settings.sip_domain or not settings.sip_username or not settings.sip_password:
+            print("✗ SIP settings not configured in database")
+            print("Please configure SIP settings in the web interface or environment variables")
+            return False
         
-        # Test registration
-        print("Testing SIP registration...")
-        if sip_client.register():
-            print("✓ SIP registration successful")
-        else:
-            print("✗ SIP registration failed")
+        print(f"Testing SIP client with settings from database:")
+        print(f"Domain: {settings.sip_domain}")
+        print(f"Username: {settings.sip_username}")
+        print(f"Port: {settings.sip_port}")
         
-        # Test status methods
-        print(f"Registration status: {sip_client.is_registered()}")
-        print(f"Registration info: {sip_client.get_registration_status()}")
-        
-        # Cleanup
-        sip_client.shutdown()
-        print("✓ SIP client shutdown complete")
-        
-    except Exception as e:
-        print(f"✗ Error testing SIP client: {e}")
-        return False
+        try:
+            # Initialize SIP client with database settings
+            sip_client = SIPClient(
+                domain=settings.sip_domain,
+                username=settings.sip_username,
+                password=settings.sip_password,
+                port=settings.sip_port
+            )
+            
+            print("✓ SIP client initialized successfully")
+            
+            # Test registration
+            print("Testing SIP registration...")
+            if sip_client.register():
+                print("✓ SIP registration successful")
+            else:
+                print("✗ SIP registration failed")
+            
+            # Test status methods
+            print(f"Registration status: {sip_client.is_registered()}")
+            print(f"Registration info: {sip_client.get_registration_status()}")
+            
+            # Cleanup
+            sip_client.shutdown()
+            print("✓ SIP client shutdown complete")
+            
+        except Exception as e:
+            print(f"✗ Error testing SIP client: {e}")
+            return False
     
     return True
 

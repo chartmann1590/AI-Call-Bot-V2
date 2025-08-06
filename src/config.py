@@ -9,10 +9,10 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///callbot.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # SIP Configuration
-    SIP_DOMAIN = os.environ.get('SIP_DOMAIN') or 'pbx.example.com'
-    SIP_USERNAME = os.environ.get('SIP_USERNAME') or '1001'
-    SIP_PASSWORD = os.environ.get('SIP_PASSWORD') or 'password'
+    # SIP Configuration - No default values for security
+    SIP_DOMAIN = os.environ.get('SIP_DOMAIN') or ''
+    SIP_USERNAME = os.environ.get('SIP_USERNAME') or ''
+    SIP_PASSWORD = os.environ.get('SIP_PASSWORD') or ''
     SIP_PORT = int(os.environ.get('SIP_PORT') or 5060)
     
     # Whisper Configuration
