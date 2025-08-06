@@ -124,6 +124,22 @@ class CoquiTTSEngine(TTSEngine):
             'voices': self.get_available_voices(),
             'sample_rate': self.sample_rate
         }
+    
+    def cleanup(self):
+        """Clean up Coqui TTS resources"""
+        try:
+            if self.tts is not None:
+                self.tts = None
+                logger.info("Coqui TTS cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up Coqui TTS: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup
 
 class ESpeakTTSEngine(TTSEngine):
     """eSpeak NG TTS engine implementation"""
@@ -222,6 +238,21 @@ class ESpeakTTSEngine(TTSEngine):
             'voices': self.get_available_voices(),
             'sample_rate': self.sample_rate
         }
+    
+    def cleanup(self):
+        """Clean up eSpeak TTS resources"""
+        try:
+            # eSpeak doesn't require explicit cleanup
+            pass
+        except Exception as e:
+            logger.error(f"Error cleaning up eSpeak TTS: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup
 
 class Pyttsx3TTSEngine(TTSEngine):
     """pyttsx3 TTS engine implementation"""
@@ -311,6 +342,23 @@ class Pyttsx3TTSEngine(TTSEngine):
             'voices': self.get_available_voices(),
             'sample_rate': self.sample_rate
         }
+    
+    def cleanup(self):
+        """Clean up pyttsx3 TTS resources"""
+        try:
+            if self.engine is not None:
+                self.engine.stop()
+                self.engine = None
+                logger.info("pyttsx3 engine cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up pyttsx3: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup
 
 class TTSManager:
     """Manager for multiple TTS engines"""
@@ -372,4 +420,25 @@ class TTSManager:
         engine = self.get_engine(engine_name)
         if engine:
             return engine.get_available_voices()
-        return [] 
+        return []
+    
+    def cleanup(self):
+        """Clean up all TTS engines"""
+        try:
+            for name, engine in self.engines.items():
+                try:
+                    if hasattr(engine, 'cleanup'):
+                        engine.cleanup()
+                except Exception as e:
+                    logger.error(f"Error cleaning up {name} engine: {e}")
+            self.engines.clear()
+            logger.info("TTS Manager cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up TTS Manager: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup 

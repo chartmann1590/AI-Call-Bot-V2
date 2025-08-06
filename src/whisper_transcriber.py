@@ -175,4 +175,21 @@ class WhisperTranscriber:
             'device': self.device,
             'compute_type': self.compute_type,
             'available_models': self.get_available_models()
-        } 
+        }
+    
+    def cleanup(self):
+        """Clean up Whisper model resources"""
+        try:
+            if self.model is not None:
+                # Clear model reference to allow garbage collection
+                self.model = None
+                logger.info("Whisper model cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up Whisper model: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup()
+        except:
+            pass  # Ignore errors during cleanup 

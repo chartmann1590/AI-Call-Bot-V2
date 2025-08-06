@@ -49,6 +49,30 @@ def create_app(config_name='default'):
     app.ollama_client = None
     app.tts_manager = None
     
+    # Add cleanup function for graceful shutdown
+    def cleanup_components():
+        """Clean up all components during shutdown"""
+        try:
+            if app.sip_client:
+                app.sip_client.shutdown()
+                app.sip_client = None
+            
+            if app.whisper_transcriber:
+                app.whisper_transcriber.cleanup()
+                app.whisper_transcriber = None
+            
+            if app.tts_manager:
+                app.tts_manager.cleanup()
+                app.tts_manager = None
+            
+            app.ollama_client = None
+            logger.info("All components cleaned up")
+        except Exception as e:
+            logger.error(f"Error during component cleanup: {e}")
+    
+    # Register cleanup function
+    app.cleanup_components = cleanup_components
+    
     # Initialize components in background
     def init_components():
         with app.app_context():
@@ -197,7 +221,12 @@ def create_app(config_name='default'):
                 def reinit_components():
                     with app.app_context():
                         try:
-                            # Reinitialize components with new settings
+                            # Clean up old components first
+                            old_whisper = app.whisper_transcriber
+                            old_ollama = app.ollama_client
+                            old_sip = app.sip_client
+                            
+                            # Initialize new components
                             app.whisper_transcriber = WhisperTranscriber(
                                 model_size=settings_obj.whisper_model_size,
                                 device=settings_obj.whisper_device
@@ -205,9 +234,14 @@ def create_app(config_name='default'):
                             
                             app.ollama_client = OllamaClient(settings_obj.ollama_url)
                             
-                            if app.sip_client:
-                                app.sip_client.shutdown()
+                            # Shutdown old SIP client properly
+                            if old_sip:
+                                try:
+                                    old_sip.shutdown()
+                                except Exception as e:
+                                    logger.error(f"Error shutting down old SIP client: {e}")
                             
+                            # Initialize new SIP client
                             app.sip_client = SIPClient(
                                 domain=settings_obj.sip_domain,
                                 username=settings_obj.sip_username,
@@ -224,8 +258,20 @@ def create_app(config_name='default'):
                             if app.sip_client.register():
                                 logger.info("SIP client re-registered successfully")
                             
+                            # Clean up old components
+                            old_whisper = None
+                            old_ollama = None
+                            old_sip = None
+                            
                         except Exception as e:
                             logger.error(f"Failed to reinitialize components: {e}")
+                            # Ensure we don't leave broken state
+                            if not app.sip_client:
+                                app.sip_client = old_sip
+                            if not app.whisper_transcriber:
+                                app.whisper_transcriber = old_whisper
+                            if not app.ollama_client:
+                                app.ollama_client = old_ollama
                 
                 reinit_thread = threading.Thread(target=reinit_components)
                 reinit_thread.daemon = True

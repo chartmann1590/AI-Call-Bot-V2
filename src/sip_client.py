@@ -65,15 +65,32 @@ class AudioRecorder:
         """Stop recording and return audio data"""
         self.recording = False
         if self.recording_thread:
-            self.recording_thread.join()
+            try:
+                self.recording_thread.join(timeout=5.0)  # Add timeout
+            except Exception as e:
+                logger.error(f"Error joining recording thread: {e}")
         
         # Combine all audio chunks
         if self.audio_chunks:
-            combined_audio = b''.join(self.audio_chunks)
-            duration = (datetime.now() - self.start_time).total_seconds()
-            logger.info(f"Recording stopped. Duration: {duration:.2f}s, Size: {len(combined_audio)} bytes")
-            return combined_audio
+            try:
+                combined_audio = b''.join(self.audio_chunks)
+                duration = (datetime.now() - self.start_time).total_seconds()
+                logger.info(f"Recording stopped. Duration: {duration:.2f}s, Size: {len(combined_audio)} bytes")
+                return combined_audio
+            except Exception as e:
+                logger.error(f"Error combining audio chunks: {e}")
+                return b''
         return b''
+    
+    def cleanup(self):
+        """Clean up audio recorder resources"""
+        try:
+            self.recording = False
+            self.audio_chunks.clear()
+            if self.recording_thread and self.recording_thread.is_alive():
+                self.recording_thread.join(timeout=1.0)
+        except Exception as e:
+            logger.error(f"Error cleaning up audio recorder: {e}")
     
     def add_audio_chunk(self, audio_data: bytes):
         """Add audio chunk to recording"""
@@ -128,26 +145,49 @@ class CallHandler:
     
     def end_call(self):
         """End the call session"""
-        self.status = 'completed'
-        audio_data = self.recorder.stop_recording()
-        duration = (datetime.now() - self.call_start_time).total_seconds()
-        
-        # Combine transcript parts
-        full_transcript = " ".join(self.transcript_parts)
-        
-        call_data = {
-            'call_id': self.call_id,
-            'caller_id': self.caller_id,
-            'transcript': full_transcript,
-            'audio_data': audio_data,
-            'duration': duration,
-            'status': self.status
-        }
-        
-        logger.info(f"Call {self.call_id} ended. Duration: {duration:.2f}s")
-        self.on_call_end()
-        
-        return call_data
+        try:
+            self.status = 'completed'
+            audio_data = self.recorder.stop_recording()
+            duration = (datetime.now() - self.call_start_time).total_seconds()
+            
+            # Combine transcript parts
+            full_transcript = " ".join(self.transcript_parts)
+            
+            call_data = {
+                'call_id': self.call_id,
+                'caller_id': self.caller_id,
+                'transcript': full_transcript,
+                'audio_data': audio_data,
+                'duration': duration,
+                'status': self.status
+            }
+            
+            logger.info(f"Call {self.call_id} ended. Duration: {duration:.2f}s")
+            self.on_call_end()
+            
+            return call_data
+        except Exception as e:
+            logger.error(f"Error ending call {self.call_id}: {e}")
+            return {
+                'call_id': self.call_id,
+                'caller_id': self.caller_id,
+                'transcript': " ".join(self.transcript_parts),
+                'audio_data': b'',
+                'duration': 0,
+                'status': 'error'
+            }
+        finally:
+            # Clean up resources
+            self.cleanup()
+    
+    def cleanup(self):
+        """Clean up call handler resources"""
+        try:
+            if hasattr(self, 'recorder'):
+                self.recorder.cleanup()
+            self.transcript_parts.clear()
+        except Exception as e:
+            logger.error(f"Error cleaning up call handler {self.call_id}: {e}")
     
     def add_transcript_part(self, transcript: str):
         """Add transcript part from speech recognition"""
@@ -482,13 +522,38 @@ class SIPClient:
     def shutdown(self):
         """Shutdown REAL pyVoIP client"""
         try:
+            # Cleanup active calls first
+            for call_id in list(self.active_calls.keys()):
+                try:
+                    if call_id in self.active_calls:
+                        call_handler = self.active_calls[call_id]
+                        if hasattr(call_handler, 'recorder'):
+                            call_handler.recorder.stop_recording()
+                        del self.active_calls[call_id]
+                except Exception as e:
+                    logger.error(f"Error cleaning up call {call_id}: {e}")
+            
+            # Clear active calls dictionary
+            self.active_calls.clear()
+            
             # Cleanup pyVoIP resources
-            if hasattr(self, 'phone'):
-                self.phone.stop()
+            if hasattr(self, 'phone') and self.phone is not None:
+                try:
+                    self.phone.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping phone: {e}")
+                finally:
+                    self.phone = None
+            
             self.registered = False
             logger.info("Real pyVoIP client shutdown complete")
         except Exception as e:
             logger.error(f"Error during pyVoIP shutdown: {e}")
+        finally:
+            # Ensure cleanup even if exceptions occur
+            self.active_calls = {}
+            self.phone = None
+            self.registered = False
 
 class pyVoIPCallback:
     """REAL pyVoIP callback handler"""
