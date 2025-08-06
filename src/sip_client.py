@@ -220,9 +220,20 @@ class SIPClient:
         sip_logger.info(f"📱 PBX Port: {port}")
         sip_logger.info(f"📱 Local Port: {local_port if local_port else 'Auto'}")
         
-        self.domain = domain
-        self.username = username
-        self.password = password
+        # Validate required parameters
+        if not domain or not domain.strip():
+            raise ValueError("SIP domain is required and cannot be empty")
+        if not username or not username.strip():
+            raise ValueError("SIP username is required and cannot be empty")
+        if not password or not password.strip():
+            raise ValueError("SIP password is required and cannot be empty")
+        if not isinstance(port, int) or port <= 0 or port > 65535:
+            raise ValueError("SIP port must be a valid integer between 1 and 65535")
+        
+        # Clean and store parameters
+        self.domain = domain.strip()
+        self.username = username.strip()
+        self.password = password.strip()
         self.port = port
         self.local_port = local_port
         self.registered = False
@@ -235,7 +246,7 @@ class SIPClient:
         self.keep_alive_thread = None
         self.running = False
         
-        sip_logger.info("📱 SIP client parameters set")
+        sip_logger.info("📱 SIP client parameters validated and set")
         
         # Initialize SIP
         sip_logger.info("📱 Starting SIP initialization...")
@@ -256,16 +267,28 @@ class SIPClient:
             try:
                 sip_logger.info(f"🔄 Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP")
                 sip_logger.info(f"📱 Domain: {self.domain}:{self.port}, Local port: {current_local_port}")
+                sip_logger.info(f"📱 Username: {self.username}, Password: {'*' * len(self.password)}")
+                
+                # Ensure all parameters are valid strings/ints before passing to pyVoIP
+                server = str(self.domain).strip()
+                username = str(self.username).strip()
+                password = str(self.password).strip()
+                port = int(self.port)
+                sip_port = int(current_local_port)
+                
+                # Double-check that no parameters are empty or None
+                if not server or not username or not password:
+                    raise ValueError(f"Invalid SIP parameters - server: '{server}', username: '{username}', password: {'*' * len(password) if password else 'None'}")
                 
                 # Initialize VoIPPhone with proper parameters for VitalPBX
                 self.phone = VoIPPhone(
-                    server=self.domain,
-                    port=self.port,
-                    username=self.username,
-                    password=self.password,
+                    server=server,
+                    port=port,
+                    username=username,
+                    password=password,
                     callCallback=self._on_incoming_call,
                     myIP=None,  # Let pyVoIP detect the IP
-                    sipPort=current_local_port,
+                    sipPort=sip_port,
                     rtpPortLow=10000,
                     rtpPortHigh=20000
                 )
@@ -278,6 +301,9 @@ class SIPClient:
                 
             except Exception as e:
                 sip_logger.error(f"💥 Attempt {attempt + 1} failed: {e}")
+                sip_logger.error(f"💥 Error type: {type(e)}")
+                import traceback
+                sip_logger.error(f"💥 Traceback: {traceback.format_exc()}")
                 
                 if "Address already in use" in str(e) or "Errno 98" in str(e):
                     sip_logger.warning(f"⚠️ Port {current_local_port} is in use")
@@ -297,28 +323,49 @@ class SIPClient:
                 sip_logger.error("📱 Phone object not initialized!")
                 return False
             
+            # Validate phone object has required attributes
+            if not hasattr(self.phone, 'start'):
+                sip_logger.error("📱 Phone object is invalid - missing start method")
+                return False
+            
             # Start the phone (this initiates registration)
             sip_logger.info("📱 Starting VoIPPhone...")
-            self.phone.start()
+            try:
+                self.phone.start()
+                sip_logger.info("📱 VoIPPhone started successfully")
+            except Exception as e:
+                sip_logger.error(f"❌ Failed to start VoIPPhone: {e}")
+                sip_logger.error(f"❌ Error type: {type(e)}")
+                import traceback
+                sip_logger.error(f"❌ Start error traceback: {traceback.format_exc()}")
+                return False
             
             # Wait for registration to complete
+            sip_logger.info("📱 Waiting for registration to complete...")
             time.sleep(2)
             
-            # Check registration status
-            # pyVoIP doesn't provide a direct way to check, so we assume success if no exception
-            self.registered = True
-            self.running = True
-            
-            # Start keep-alive thread for maintaining registration
-            self._start_keep_alive()
-            
-            sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
-            sip_logger.info(f"📱 Extension: {self.username}")
-            
-            return True
+            # Check if phone is still running
+            if hasattr(self.phone, 'sip') and self.phone.sip:
+                sip_logger.info("✅ SIP client appears to be running")
+                self.registered = True
+                self.running = True
+                
+                # Start keep-alive thread for maintaining registration
+                self._start_keep_alive()
+                
+                sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
+                sip_logger.info(f"📱 Extension: {self.username}")
+                
+                return True
+            else:
+                sip_logger.error("❌ SIP client failed to start properly")
+                return False
             
         except Exception as e:
             sip_logger.error(f"❌ Registration failed: {e}")
+            sip_logger.error(f"❌ Error type: {type(e)}")
+            import traceback
+            sip_logger.error(f"❌ Registration error traceback: {traceback.format_exc()}")
             self.registered = False
             return False
     

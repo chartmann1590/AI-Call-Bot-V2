@@ -34,11 +34,26 @@ def test_sip_client():
         settings = Settings.get_settings()
         
         # Check if SIP settings are configured
-        if not settings.sip_domain or not settings.sip_username or not settings.sip_password:
-            print("✗ SIP settings not configured in database")
+        print(f"Checking SIP settings from database:")
+        print(f"Domain: '{settings.sip_domain}'")
+        print(f"Username: '{settings.sip_username}'")
+        print(f"Password: {'*' * len(settings.sip_password) if settings.sip_password else 'None'}")
+        print(f"Port: {settings.sip_port}")
+        
+        if not settings.sip_domain or not settings.sip_domain.strip():
+            print("✗ SIP domain is not configured")
+            print("Please configure SIP settings in the web interface or environment variables")
+            return False
+        elif not settings.sip_username or not settings.sip_username.strip():
+            print("✗ SIP username is not configured")
+            print("Please configure SIP settings in the web interface or environment variables")
+            return False
+        elif not settings.sip_password or not settings.sip_password.strip():
+            print("✗ SIP password is not configured")
             print("Please configure SIP settings in the web interface or environment variables")
             return False
         
+        print(f"✓ SIP settings are configured")
         print(f"Testing SIP client with settings from database:")
         print(f"Domain: {settings.sip_domain}")
         print(f"Username: {settings.sip_username}")
@@ -47,9 +62,9 @@ def test_sip_client():
         try:
             # Initialize SIP client with database settings
             sip_client = SIPClient(
-                domain=settings.sip_domain,
-                username=settings.sip_username,
-                password=settings.sip_password,
+                domain=settings.sip_domain.strip(),
+                username=settings.sip_username.strip(),
+                password=settings.sip_password.strip(),
                 port=settings.sip_port
             )
             
@@ -70,8 +85,13 @@ def test_sip_client():
             sip_client.shutdown()
             print("✓ SIP client shutdown complete")
             
+        except ValueError as e:
+            print(f"✗ SIP client validation error: {e}")
+            return False
         except Exception as e:
             print(f"✗ Error testing SIP client: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return False
     
     return True

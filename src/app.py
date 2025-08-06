@@ -156,36 +156,58 @@ def create_app(config_name='default'):
                 logger.info(f"Creating SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
                 logger.info(f"SIP settings from database: domain={settings.sip_domain}, username={settings.sip_username}, password={'*' * len(settings.sip_password) if settings.sip_password else 'None'}, port={settings.sip_port}")
                 
-                app.sip_client = SIPClient(
-                    domain=settings.sip_domain,
-                    username=settings.sip_username,
-                    password=settings.sip_password,
-                    port=settings.sip_port
-                )
-                logger.info("SIP client created successfully")
-                
-                # Set SIP callbacks
-                logger.info("=== SETTING SIP CALLBACKS ===")
-                logger.info("Setting up callbacks for incoming calls, transcripts, and call ends...")
-                app.sip_client.set_callbacks(
-                    on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
-                    on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
-                    on_call_end=lambda call_id: app._handle_call_end(call_id)
-                )
-                logger.info("SIP callbacks set successfully")
-                
-                # Register with SIP server
-                logger.info("=== REGISTERING WITH SIP SERVER ===")
-                logger.info("Attempting to register SIP client with server...")
-                registration_result = app.sip_client.register()
-                logger.info(f"SIP registration result: {registration_result}")
-                
-                if registration_result:
-                    logger.info("✅ SIP client registered successfully with server")
-                    logger.info("✅ CallBot is now ready to receive calls")
+                # Validate SIP settings before creating client
+                if not settings.sip_domain or not settings.sip_domain.strip():
+                    logger.error("❌ SIP domain is not configured")
+                    logger.error("❌ Please configure SIP settings in the web interface")
+                    app.sip_client = None
+                elif not settings.sip_username or not settings.sip_username.strip():
+                    logger.error("❌ SIP username is not configured")
+                    logger.error("❌ Please configure SIP settings in the web interface")
+                    app.sip_client = None
+                elif not settings.sip_password or not settings.sip_password.strip():
+                    logger.error("❌ SIP password is not configured")
+                    logger.error("❌ Please configure SIP settings in the web interface")
+                    app.sip_client = None
                 else:
-                    logger.error("❌ SIP registration failed - CallBot cannot receive calls")
-                    logger.error("❌ Check SIP server settings and network connectivity")
+                    try:
+                        app.sip_client = SIPClient(
+                            domain=settings.sip_domain.strip(),
+                            username=settings.sip_username.strip(),
+                            password=settings.sip_password.strip(),
+                            port=settings.sip_port
+                        )
+                        logger.info("SIP client created successfully")
+                        
+                        # Set SIP callbacks
+                        logger.info("=== SETTING SIP CALLBACKS ===")
+                        logger.info("Setting up callbacks for incoming calls, transcripts, and call ends...")
+                        app.sip_client.set_callbacks(
+                            on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
+                            on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
+                            on_call_end=lambda call_id: app._handle_call_end(call_id)
+                        )
+                        logger.info("SIP callbacks set successfully")
+                        
+                        # Register with SIP server
+                        logger.info("=== REGISTERING WITH SIP SERVER ===")
+                        logger.info("Attempting to register SIP client with server...")
+                        registration_result = app.sip_client.register()
+                        logger.info(f"SIP registration result: {registration_result}")
+                        
+                        if registration_result:
+                            logger.info("✅ SIP client registered successfully with server")
+                            logger.info("✅ CallBot is now ready to receive calls")
+                        else:
+                            logger.error("❌ SIP registration failed - CallBot cannot receive calls")
+                            logger.error("❌ Check SIP server settings and network connectivity")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create SIP client: {e}")
+                        logger.error(f"❌ Error type: {type(e)}")
+                        import traceback
+                        logger.error(f"❌ SIP client creation error traceback: {traceback.format_exc()}")
+                        app.sip_client = None
                 
                 logger.info("=== COMPONENT INITIALIZATION COMPLETE ===")
                 
