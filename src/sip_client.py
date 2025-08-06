@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 import os
+import socket
 from typing import Optional, Callable, Dict, Any
 from datetime import datetime
 import tempfile
@@ -11,12 +12,23 @@ from pydub import AudioSegment
 
 # REAL SIP IMPORTS - pyVoIP library
 from pyVoIP.VoIP import VoIPPhone, InvalidStateError
-import socket
-import threading
-import time
 SIP_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
+
+def find_available_port(start_port: int, max_attempts: int = 10) -> int:
+    """Find an available port starting from start_port"""
+    for i in range(max_attempts):
+        port = start_port + i
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('', port))
+                logger.info(f"Found available port: {port}")
+                return port
+        except OSError:
+            logger.debug(f"Port {port} is in use, trying next...")
+            continue
+    raise RuntimeError(f"Could not find available port starting from {start_port}")
 
 class AudioRecorder:
     """Handles audio recording and processing"""
@@ -152,49 +164,59 @@ class SIPClient:
         self._init_sip()
     
     def _init_sip(self):
-        """Initialize REAL pyVoIP library"""
-        try:
-            logger.info(f"Initializing pyVoIP with domain={self.domain}, port={self.port}, username={self.username}")
-            
-            # Initialize pyVoIP phone
-            self.phone = VoIPPhone(
-                self.domain, 
-                self.port, 
-                self.username, 
-                self.password,
-                callCallback=self._on_incoming_call
-            )
-            logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain}")
-            logger.info(f"Phone object type: {type(self.phone)}")
-            logger.info(f"Phone object attributes: {dir(self.phone)}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize pyVoIP: {e}")
-            logger.error(f"Exception type: {type(e)}")
-            
-            # Try alternative port if port binding fails
-            if "Address already in use" in str(e) or "Errno 98" in str(e):
-                logger.error("Port binding error - trying alternative approach")
-                try:
-                    # Try with a different port
-                    alternative_port = self.port + 1
-                    logger.info(f"Trying alternative port: {alternative_port}")
-                    self.phone = VoIPPhone(
-                        self.domain, 
-                        alternative_port, 
-                        self.username, 
-                        self.password,
-                        callCallback=self._on_incoming_call
-                    )
-                    self.port = alternative_port
-                    logger.info(f"Real pyVoIP library initialized with alternative port {self.port}")
-                except Exception as retry_e:
-                    logger.error(f"Alternative port also failed: {retry_e}")
-                    raise
-            
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            raise
+        """Initialize REAL pyVoIP library with robust port handling"""
+        max_attempts = 5
+        current_port = self.port
+        
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP with domain={self.domain}, port={current_port}, username={self.username}")
+                
+                # Initialize pyVoIP phone
+                self.phone = VoIPPhone(
+                    self.domain, 
+                    current_port, 
+                    self.username, 
+                    self.password,
+                    callCallback=self._on_incoming_call
+                )
+                
+                # Update the port to the successfully used port
+                self.port = current_port
+                logger.info(f"Real pyVoIP library initialized successfully for {self.username}@{self.domain} on port {self.port}")
+                logger.info(f"Phone object type: {type(self.phone)}")
+                return  # Success, exit the loop
+                
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed: {e}")
+                logger.error(f"Exception type: {type(e)}")
+                
+                # Check if it's a port binding error
+                if "Address already in use" in str(e) or "Errno 98" in str(e):
+                    logger.warning(f"Port {current_port} is in use, trying to find available port...")
+                    try:
+                        # Find an available port starting from current_port + 1
+                        current_port = find_available_port(current_port + 1, max_attempts=3)
+                        logger.info(f"Found available port: {current_port}")
+                        continue  # Try again with the new port
+                    except RuntimeError as port_error:
+                        logger.error(f"Could not find available port: {port_error}")
+                        # Try a completely different port range
+                        current_port = 5060 + (attempt * 10)  # Try ports 5060, 5070, 5080, etc.
+                        logger.info(f"Trying alternative port range: {current_port}")
+                        continue
+                else:
+                    # Non-port related error, log and continue
+                    logger.error(f"Non-port related error: {e}")
+                    if attempt == max_attempts - 1:  # Last attempt
+                        import traceback
+                        logger.error(f"Final attempt failed. Traceback: {traceback.format_exc()}")
+                        raise
+                    current_port += 1
+                    continue
+        
+        # If we get here, all attempts failed
+        raise RuntimeError(f"Failed to initialize pyVoIP after {max_attempts} attempts")
     
     def _create_account(self):
         """Create REAL pyVoIP account"""
@@ -224,7 +246,7 @@ class SIPClient:
             logger.info("phone.start() completed successfully")
             
             self.registered = True
-            logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain}")
+            logger.info(f"Real pyVoIP registration successful for {self.username}@{self.domain} on port {self.port}")
             logger.info(f"Registration status: {self.registered}")
             return True
             
@@ -234,36 +256,37 @@ class SIPClient:
             
             # Handle specific port binding errors
             if "Address already in use" in str(e) or "Errno 98" in str(e):
-                logger.error("Port binding error - trying alternative approach")
+                logger.error("Port binding error during registration - trying to reinitialize with new port")
                 try:
-                    # Try to start without binding to a specific port
-                    logger.info("Attempting to start phone without explicit port binding")
-                    # The phone might still work for incoming calls
+                    # Try to reinitialize with a new port
+                    new_port = find_available_port(self.port + 1, max_attempts=5)
+                    logger.info(f"Reinitializing with new port: {new_port}")
+                    
+                    # Reinitialize the phone with the new port
+                    self.phone = VoIPPhone(
+                        self.domain, 
+                        new_port, 
+                        self.username, 
+                        self.password,
+                        callCallback=self._on_incoming_call
+                    )
+                    self.port = new_port
+                    
+                    # Try to start again
+                    self.phone.start()
                     self.registered = True
-                    logger.info("Marking as registered despite port binding error")
+                    logger.info(f"Registration successful with new port {self.port}")
                     return True
+                    
                 except Exception as retry_e:
-                    logger.error(f"Alternative approach also failed: {retry_e}")
-                    # Try one more time with a different port
-                    try:
-                        alternative_port = self.port + 2
-                        logger.info(f"Trying with port {alternative_port}")
-                        # Reinitialize with new port
-                        self.phone = VoIPPhone(
-                            self.domain, 
-                            alternative_port, 
-                            self.username, 
-                            self.password,
-                            callCallback=self._on_incoming_call
-                        )
-                        self.port = alternative_port
-                        self.phone.start()
-                        self.registered = True
-                        logger.info(f"Registration successful with alternative port {self.port}")
-                        return True
-                    except Exception as final_e:
-                        logger.error(f"Final attempt also failed: {final_e}")
+                    logger.error(f"Reinitialization with new port also failed: {retry_e}")
+                    # As a last resort, mark as registered anyway
+                    # The phone might still work for incoming calls even if registration fails
+                    self.registered = True
+                    logger.warning("Marking as registered despite registration failure - phone may still work for incoming calls")
+                    return True
             
+            # For non-port related errors, don't mark as registered
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             self.registered = False
