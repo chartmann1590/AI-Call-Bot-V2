@@ -6,8 +6,11 @@ from typing import Generator, Optional, List
 import soundfile as sf
 from pydub import AudioSegment
 import tempfile
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Configure comprehensive logging for Whisper transcriber
+whisper_logger = logging.getLogger('whisper')
+whisper_logger.setLevel(logging.DEBUG)
 
 class WhisperTranscriber:
     """Handles real-time audio transcription using Faster Whisper"""
@@ -21,24 +24,42 @@ class WhisperTranscriber:
             device: Device to run on (cpu, cuda)
             compute_type: Compute type for quantization (int8, float16, float32)
         """
+        whisper_logger.info("=== INITIALIZING WHISPER TRANSCRIBER ===")
+        whisper_logger.info(f"🎤 Model size: {model_size}")
+        whisper_logger.info(f"🎤 Device: {device}")
+        whisper_logger.info(f"🎤 Compute type: {compute_type}")
+        
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
         self.model = None
+        
+        whisper_logger.info("🎤 Starting model loading...")
         self._load_model()
+        whisper_logger.info("✅ Whisper transcriber initialized successfully")
     
     def _load_model(self):
         """Load the Whisper model"""
         try:
-            logger.info(f"Loading Whisper model: {self.model_size} on {self.device}")
+            whisper_logger.info(f"🎤 Loading Whisper model: {self.model_size} on {self.device}")
+            whisper_logger.info(f"🎤 Compute type: {self.compute_type}")
+            
+            start_time = datetime.now()
             self.model = WhisperModel(
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type
             )
-            logger.info("Whisper model loaded successfully")
+            load_time = (datetime.now() - start_time).total_seconds()
+            
+            whisper_logger.info(f"✅ Whisper model loaded successfully in {load_time:.2f}s")
+            whisper_logger.info(f"🎤 Model type: {type(self.model)}")
+            
         except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
+            whisper_logger.error(f"❌ Failed to load Whisper model: {e}")
+            whisper_logger.error(f"Exception type: {type(e)}")
+            import traceback
+            whisper_logger.error(f"Model loading error traceback: {traceback.format_exc()}")
             raise
     
     def transcribe_audio_chunk(self, audio_data: bytes, sample_rate: int = 16000) -> Optional[str]:
@@ -52,12 +73,23 @@ class WhisperTranscriber:
         Returns:
             Transcribed text or None if transcription failed
         """
+        whisper_logger.info("=== TRANSCRIBING AUDIO CHUNK ===")
+        whisper_logger.info(f"🎤 Audio data size: {len(audio_data)} bytes")
+        whisper_logger.info(f"🎤 Sample rate: {sample_rate}")
+        whisper_logger.info(f"🎤 Timestamp: {datetime.now()}")
+        
         try:
             # Convert bytes to numpy array
+            whisper_logger.debug(f"🎤 Converting audio bytes to numpy array...")
             audio_array = np.frombuffer(audio_data, dtype=np.int16)
             audio_array = audio_array.astype(np.float32) / 32768.0
+            whisper_logger.debug(f"🎤 Audio array shape: {audio_array.shape}")
+            whisper_logger.debug(f"🎤 Audio array dtype: {audio_array.dtype}")
             
             # Transcribe using Whisper
+            whisper_logger.info(f"🎤 Starting Whisper transcription...")
+            start_time = datetime.now()
+            
             segments, _ = self.model.transcribe(
                 audio_array,
                 language="en",
@@ -65,12 +97,29 @@ class WhisperTranscriber:
                 vad_filter=True
             )
             
+            transcription_time = (datetime.now() - start_time).total_seconds()
+            whisper_logger.info(f"🎤 Transcription completed in {transcription_time:.2f}s")
+            
             # Combine all segments
             transcript = " ".join([segment.text for segment in segments])
-            return transcript.strip() if transcript else None
+            whisper_logger.info(f"🎤 Number of segments: {len(list(segments))}")
+            whisper_logger.info(f"🎤 Raw transcript: {transcript}")
+            
+            if transcript:
+                transcript = transcript.strip()
+                whisper_logger.info(f"✅ Transcription successful")
+                whisper_logger.info(f"🎤 Final transcript: {transcript}")
+                whisper_logger.info(f"🎤 Transcript length: {len(transcript)} characters")
+            else:
+                whisper_logger.warning(f"⚠️ No transcript generated")
+            
+            return transcript
             
         except Exception as e:
-            logger.error(f"Error transcribing audio chunk: {e}")
+            whisper_logger.error(f"❌ Error transcribing audio chunk: {e}")
+            whisper_logger.error(f"Exception type: {type(e)}")
+            import traceback
+            whisper_logger.error(f"Transcription error traceback: {traceback.format_exc()}")
             return None
     
     def transcribe_file(self, audio_file_path: str) -> Optional[str]:
@@ -83,7 +132,16 @@ class WhisperTranscriber:
         Returns:
             Transcribed text or None if transcription failed
         """
+        whisper_logger.info("=== TRANSCRIBING AUDIO FILE ===")
+        whisper_logger.info(f"🎤 Audio file: {audio_file_path}")
+        whisper_logger.info(f"🎤 File exists: {os.path.exists(audio_file_path)}")
+        whisper_logger.info(f"🎤 File size: {os.path.getsize(audio_file_path) if os.path.exists(audio_file_path) else 'Unknown'} bytes")
+        whisper_logger.info(f"🎤 Timestamp: {datetime.now()}")
+        
         try:
+            whisper_logger.info(f"🎤 Starting Whisper transcription of file...")
+            start_time = datetime.now()
+            
             segments, _ = self.model.transcribe(
                 audio_file_path,
                 language="en",
@@ -91,11 +149,28 @@ class WhisperTranscriber:
                 vad_filter=True
             )
             
+            transcription_time = (datetime.now() - start_time).total_seconds()
+            whisper_logger.info(f"🎤 File transcription completed in {transcription_time:.2f}s")
+            
             transcript = " ".join([segment.text for segment in segments])
-            return transcript.strip() if transcript else None
+            whisper_logger.info(f"🎤 Number of segments: {len(list(segments))}")
+            whisper_logger.info(f"🎤 Raw transcript: {transcript}")
+            
+            if transcript:
+                transcript = transcript.strip()
+                whisper_logger.info(f"✅ File transcription successful")
+                whisper_logger.info(f"🎤 Final transcript: {transcript}")
+                whisper_logger.info(f"🎤 Transcript length: {len(transcript)} characters")
+            else:
+                whisper_logger.warning(f"⚠️ No transcript generated from file")
+            
+            return transcript
             
         except Exception as e:
-            logger.error(f"Error transcribing audio file {audio_file_path}: {e}")
+            whisper_logger.error(f"❌ Error transcribing audio file {audio_file_path}: {e}")
+            whisper_logger.error(f"Exception type: {type(e)}")
+            import traceback
+            whisper_logger.error(f"File transcription error traceback: {traceback.format_exc()}")
             return None
     
     def transcribe_streaming(self, audio_chunks: Generator[bytes, None, None], 
@@ -161,7 +236,10 @@ class WhisperTranscriber:
             return True
             
         except Exception as e:
-            logger.error(f"Error converting audio format: {e}")
+            whisper_logger.error(f"❌ Error converting audio format: {e}")
+            whisper_logger.error(f"Exception type: {type(e)}")
+            import traceback
+            whisper_logger.error(f"Audio format conversion error traceback: {traceback.format_exc()}")
             return False
     
     def get_available_models(self) -> List[str]:
@@ -183,9 +261,12 @@ class WhisperTranscriber:
             if self.model is not None:
                 # Clear model reference to allow garbage collection
                 self.model = None
-                logger.info("Whisper model cleaned up")
+                whisper_logger.info("🎤 Whisper model cleaned up")
         except Exception as e:
-            logger.error(f"Error cleaning up Whisper model: {e}")
+            whisper_logger.error(f"❌ Error cleaning up Whisper model: {e}")
+            whisper_logger.error(f"Exception type: {type(e)}")
+            import traceback
+            whisper_logger.error(f"Model cleanup error traceback: {traceback.format_exc()}")
     
     def __del__(self):
         """Destructor to ensure cleanup"""

@@ -16,32 +16,60 @@ from src.whisper_transcriber import WhisperTranscriber
 from src.ollama_client import OllamaClient
 from src.tts_engines import TTSManager
 
-# Configure logging
+# Configure comprehensive logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,  # Changed to DEBUG for maximum visibility
+    format='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('callbot.log', mode='a')
+    ]
 )
 logger = logging.getLogger(__name__)
 
+# Add specific loggers for different components
+sip_logger = logging.getLogger('sip_client')
+app_logger = logging.getLogger('app')
+call_logger = logging.getLogger('call_handler')
+tts_logger = logging.getLogger('tts')
+ollama_logger = logging.getLogger('ollama')
+whisper_logger = logging.getLogger('whisper')
+
 def create_app(config_name='default'):
     """Application factory"""
+    logger.info("=== STARTING CALLBOT APPLICATION ===")
+    logger.info(f"Creating Flask app with config: {config_name}")
+    
     import os
     # Get the absolute path to templates and static folders
     # In Docker, the working directory is /app, and templates are at /app/templates
     base_dir = os.getcwd()
     template_dir = os.path.join(base_dir, 'templates')
     static_dir = os.path.join(base_dir, 'static')
+    
+    logger.info(f"Base directory: {base_dir}")
+    logger.info(f"Template directory: {template_dir}")
+    logger.info(f"Static directory: {static_dir}")
+    
     app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
     app.config.from_object(config[config_name])
     
+    logger.info("Flask app created successfully")
+    
     # Initialize extensions
+    logger.info("Initializing database...")
     db.init_app(app)
     
     # Create database tables
     with app.app_context():
+        logger.info("Creating database tables...")
         db.create_all()
+        logger.info("Database tables created successfully")
+        
         # Ensure settings exist
+        logger.info("Loading settings...")
         Settings.get_settings()
+        logger.info("Settings loaded successfully")
     
     # Initialize components
     app.sip_client = None
@@ -49,59 +77,85 @@ def create_app(config_name='default'):
     app.ollama_client = None
     app.tts_manager = None
     
+    logger.info("Component placeholders initialized")
+    
     # Add cleanup function for graceful shutdown
     def cleanup_components():
         """Clean up all components during shutdown"""
+        logger.info("=== CLEANING UP COMPONENTS ===")
         try:
             if app.sip_client:
+                logger.info("Shutting down SIP client...")
                 app.sip_client.shutdown()
                 app.sip_client = None
+                logger.info("SIP client shutdown complete")
             
             if app.whisper_transcriber:
+                logger.info("Cleaning up Whisper transcriber...")
                 app.whisper_transcriber.cleanup()
                 app.whisper_transcriber = None
+                logger.info("Whisper transcriber cleanup complete")
             
             if app.tts_manager:
+                logger.info("Cleaning up TTS manager...")
                 app.tts_manager.cleanup()
                 app.tts_manager = None
+                logger.info("TTS manager cleanup complete")
             
             app.ollama_client = None
-            logger.info("All components cleaned up")
+            logger.info("All components cleaned up successfully")
         except Exception as e:
             logger.error(f"Error during component cleanup: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Cleanup traceback: {traceback.format_exc()}")
     
     # Register cleanup function
     app.cleanup_components = cleanup_components
     
     # Initialize components in background
     def init_components():
+        logger.info("=== INITIALIZING COMPONENTS ===")
         with app.app_context():
             try:
                 # Wait a moment for database to be ready
+                logger.info("Waiting for database to be ready...")
                 time.sleep(1)
                 
-                # Initialize Whisper transcriber
+                # Load settings
+                logger.info("Loading application settings...")
                 settings = Settings.get_settings()
-                logger.info(f"Loaded settings - Ollama URL: {settings.ollama_url}")
+                logger.info(f"Settings loaded - Ollama URL: {settings.ollama_url}")
+                logger.info(f"SIP Domain: {settings.sip_domain}")
+                logger.info(f"SIP Username: {settings.sip_username}")
+                logger.info(f"SIP Port: {settings.sip_port}")
+                logger.info(f"Whisper Model: {settings.whisper_model_size}")
+                logger.info(f"TTS Engine: {settings.tts_engine}")
                 
+                # Initialize Whisper transcriber
+                logger.info("=== INITIALIZING WHISPER TRANSCRIBER ===")
                 app.whisper_transcriber = WhisperTranscriber(
                     model_size=settings.whisper_model_size,
                     device=settings.whisper_device
                 )
-                logger.info("Whisper transcriber initialized")
+                logger.info("Whisper transcriber initialized successfully")
                 
                 # Initialize Ollama client with current settings
+                logger.info("=== INITIALIZING OLLAMA CLIENT ===")
                 logger.info(f"Initializing Ollama client with URL: {settings.ollama_url}")
                 app.ollama_client = OllamaClient(settings.ollama_url)
-                logger.info("Ollama client initialized")
+                logger.info("Ollama client initialized successfully")
                 
                 # Initialize TTS manager
+                logger.info("=== INITIALIZING TTS MANAGER ===")
                 app.tts_manager = TTSManager()
-                logger.info("TTS manager initialized")
+                logger.info("TTS manager initialized successfully")
                 
                 # Initialize SIP client
-                logger.info(f"MAIN APP - Initializing SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
-                logger.info(f"MAIN APP - Settings from database: domain={settings.sip_domain}, username={settings.sip_username}, password={'*' * len(settings.sip_password) if settings.sip_password else 'None'}, port={settings.sip_port}")
+                logger.info("=== INITIALIZING SIP CLIENT ===")
+                logger.info(f"Creating SIP client with domain={settings.sip_domain}, username={settings.sip_username}, port={settings.sip_port}")
+                logger.info(f"SIP settings from database: domain={settings.sip_domain}, username={settings.sip_username}, password={'*' * len(settings.sip_password) if settings.sip_password else 'None'}, port={settings.sip_port}")
+                
                 app.sip_client = SIPClient(
                     domain=settings.sip_domain,
                     username=settings.sip_username,
@@ -111,7 +165,8 @@ def create_app(config_name='default'):
                 logger.info("SIP client created successfully")
                 
                 # Set SIP callbacks
-                logger.info("Setting SIP callbacks...")
+                logger.info("=== SETTING SIP CALLBACKS ===")
+                logger.info("Setting up callbacks for incoming calls, transcripts, and call ends...")
                 app.sip_client.set_callbacks(
                     on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
                     on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
@@ -120,36 +175,50 @@ def create_app(config_name='default'):
                 logger.info("SIP callbacks set successfully")
                 
                 # Register with SIP server
-                logger.info("Attempting to register SIP client...")
+                logger.info("=== REGISTERING WITH SIP SERVER ===")
+                logger.info("Attempting to register SIP client with server...")
                 registration_result = app.sip_client.register()
                 logger.info(f"SIP registration result: {registration_result}")
                 
                 if registration_result:
-                    logger.info("SIP client registered successfully")
+                    logger.info("✅ SIP client registered successfully with server")
+                    logger.info("✅ CallBot is now ready to receive calls")
                 else:
-                    logger.error("SIP registration failed")
+                    logger.error("❌ SIP registration failed - CallBot cannot receive calls")
+                    logger.error("❌ Check SIP server settings and network connectivity")
+                
+                logger.info("=== COMPONENT INITIALIZATION COMPLETE ===")
                 
             except Exception as e:
-                logger.error(f"Failed to initialize components: {e}")
+                logger.error(f"❌ Failed to initialize components: {e}")
+                logger.error(f"Exception type: {type(e)}")
+                import traceback
+                logger.error(f"Initialization traceback: {traceback.format_exc()}")
     
     # Start initialization in background
+    logger.info("Starting component initialization in background thread...")
     init_thread = threading.Thread(target=init_components)
     init_thread.daemon = True
     init_thread.start()
+    logger.info("Component initialization thread started")
     
     # Setup Flask-Admin
+    logger.info("Setting up Flask-Admin...")
     admin = Admin(app, name='CallBot Admin', template_mode='bootstrap3')
     admin.add_view(ModelView(Call, db.session))
     admin.add_view(ModelView(Settings, db.session))
+    logger.info("Flask-Admin setup complete")
     
     @app.route('/')
     def index():
         """Home page"""
+        logger.info("Home page requested")
         return render_template('index.html')
     
     @app.route('/conversations')
     def conversations():
         """Conversations page - list all calls"""
+        logger.info("Conversations page requested")
         page = request.args.get('page', 1, type=int)
         search = request.args.get('search', '')
         
@@ -173,19 +242,25 @@ def create_app(config_name='default'):
             page=page, per_page=20, error_out=False
         )
         
+        logger.info(f"Retrieved {len(calls.items)} calls for conversations page")
         return render_template('conversations.html', calls=calls, search=search)
     
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
         """Settings page"""
+        logger.info("Settings page requested")
         settings_obj = Settings.get_settings()
         
         if request.method == 'POST':
+            logger.info("Settings update requested")
             try:
                 # Check if Ollama URL has changed
                 old_ollama_url = settings_obj.ollama_url
                 new_ollama_url = request.form['ollama_url']
                 ollama_url_changed = old_ollama_url != new_ollama_url
+                
+                logger.info(f"Updating settings - Old Ollama URL: {old_ollama_url}")
+                logger.info(f"Updating settings - New Ollama URL: {new_ollama_url}")
                 
                 # Update settings
                 settings_obj.ollama_url = new_ollama_url
@@ -567,29 +642,78 @@ def create_app(config_name='default'):
     # Call handling methods
     def _handle_incoming_call(call_id: str, caller_id: str):
         """Handle incoming call"""
-        logger.info(f"Handling incoming call {call_id} from {caller_id}")
+        logger.info("=== INCOMING CALL RECEIVED ===")
+        logger.info(f"📞 New call received - Call ID: {call_id}, Caller ID: {caller_id}")
+        logger.info(f"📞 Call timestamp: {datetime.utcnow()}")
         
-        # Create call record
-        call = Call(
-            caller_id=caller_id,
-            status='in_progress'
-        )
-        db.session.add(call)
-        db.session.commit()
-        
-        # Store call ID mapping
-        if not hasattr(app, '_call_mapping'):
-            app._call_mapping = {}
-        app._call_mapping[call_id] = call.id
+        try:
+            # Create call record
+            logger.info(f"Creating database record for call {call_id}...")
+            call = Call(
+                caller_id=caller_id,
+                status='in_progress'
+            )
+            db.session.add(call)
+            db.session.commit()
+            logger.info(f"✅ Database record created for call {call_id} with ID: {call.id}")
+            
+            # Store call ID mapping
+            if not hasattr(app, '_call_mapping'):
+                app._call_mapping = {}
+            app._call_mapping[call_id] = call.id
+            logger.info(f"✅ Call mapping stored: SIP call {call_id} -> DB call {call.id}")
+            
+            logger.info(f"✅ Incoming call {call_id} from {caller_id} handled successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling incoming call {call_id}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Incoming call error traceback: {traceback.format_exc()}")
     
     def _handle_call_transcript(call_id: str, transcript: str):
         """Handle transcript from call"""
-        logger.info(f"Call {call_id} transcript: {transcript}")
+        logger.info("=== CALL TRANSCRIPT RECEIVED ===")
+        logger.info(f"🎤 Call {call_id} transcript: {transcript}")
+        logger.info(f"🎤 Transcript length: {len(transcript)} characters")
+        logger.info(f"🎤 Transcript timestamp: {datetime.utcnow()}")
         
-        # Get call record
-        if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
-            call_id_db = app._call_mapping[call_id]
-            call = Call.query.get(call_id_db)
+        try:
+            # Get call record
+            if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
+                call_id_db = app._call_mapping[call_id]
+                logger.info(f"Looking up call record with DB ID: {call_id_db}")
+                call = Call.query.get(call_id_db)
+                
+                if call:
+                    logger.info(f"✅ Found call record for call {call_id}")
+                    
+                    # Update transcript
+                    old_transcript = call.transcript
+                    if call.transcript:
+                        call.transcript += " " + transcript
+                        logger.info(f"✅ Appended transcript to existing transcript")
+                    else:
+                        call.transcript = transcript
+                        logger.info(f"✅ Set initial transcript")
+                    
+                    db.session.commit()
+                    logger.info(f"✅ Transcript updated in database for call {call_id}")
+                    
+                    # Generate AI response
+                    logger.info(f"🔄 Triggering AI response generation for call {call_id}")
+                    app._generate_ai_response(call, transcript)
+                else:
+                    logger.error(f"❌ Call record not found for call {call_id} with DB ID {call_id_db}")
+            else:
+                logger.error(f"❌ No call mapping found for call {call_id}")
+                logger.error(f"Available call mappings: {list(app._call_mapping.keys()) if hasattr(app, '_call_mapping') else 'None'}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error handling transcript for call {call_id}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Transcript error traceback: {traceback.format_exc()}")
             
             if call:
                 # Update transcript
@@ -605,63 +729,118 @@ def create_app(config_name='default'):
     
     def _handle_call_end(call_id: str):
         """Handle call end"""
-        logger.info(f"Call {call_id} ended")
+        logger.info("=== CALL ENDED ===")
+        logger.info(f"📞 Call {call_id} ended")
+        logger.info(f"📞 Call end timestamp: {datetime.utcnow()}")
         
-        # Get call record
-        if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
-            call_id_db = app._call_mapping[call_id]
-            call = Call.query.get(call_id_db)
-            
-            if call:
-                call.status = 'completed'
-                call.duration = int((datetime.utcnow() - call.timestamp).total_seconds())
-                db.session.commit()
+        try:
+            # Get call record
+            if hasattr(app, '_call_mapping') and call_id in app._call_mapping:
+                call_id_db = app._call_mapping[call_id]
+                logger.info(f"Looking up call record with DB ID: {call_id_db}")
+                call = Call.query.get(call_id_db)
                 
-                # Clean up mapping
-                del app._call_mapping[call_id]
+                if call:
+                    logger.info(f"✅ Found call record for call {call_id}")
+                    
+                    # Calculate call duration
+                    call_duration = int((datetime.utcnow() - call.timestamp).total_seconds())
+                    logger.info(f"📞 Call duration: {call_duration} seconds")
+                    
+                    # Update call status
+                    call.status = 'completed'
+                    call.duration = call_duration
+                    db.session.commit()
+                    logger.info(f"✅ Call {call_id} marked as completed in database")
+                    
+                    # Clean up mapping
+                    del app._call_mapping[call_id]
+                    logger.info(f"✅ Call mapping cleaned up for call {call_id}")
+                    
+                    logger.info(f"✅ Call {call_id} ended successfully")
+                else:
+                    logger.error(f"❌ Call record not found for call {call_id} with DB ID {call_id_db}")
+            else:
+                logger.error(f"❌ No call mapping found for call {call_id}")
+                logger.error(f"Available call mappings: {list(app._call_mapping.keys()) if hasattr(app, '_call_mapping') else 'None'}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error handling call end for call {call_id}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Call end error traceback: {traceback.format_exc()}")
     
     def _generate_ai_response(self, call: Call, transcript: str):
         """Generate AI response for call"""
+        logger.info("=== GENERATING AI RESPONSE ===")
+        logger.info(f"🤖 Generating AI response for call {call.id}")
+        logger.info(f"🤖 Input transcript: {transcript}")
+        logger.info(f"🤖 Transcript length: {len(transcript)} characters")
+        
         try:
             if not self.ollama_client:
-                logger.error("Ollama client not available")
+                logger.error("❌ Ollama client not available")
                 return
             
             settings = Settings.get_settings()
+            logger.info(f"🤖 Using Ollama model: {settings.ollama_model}")
+            logger.info(f"🤖 Ollama URL: {settings.ollama_url}")
             
             # Generate AI response
+            logger.info(f"🤖 Sending request to Ollama...")
             ai_response = self.ollama_client.generate_with_context(
                 transcript=transcript,
                 model=settings.ollama_model
             )
             
             if ai_response:
+                logger.info(f"✅ AI response generated successfully")
+                logger.info(f"🤖 AI response: {ai_response}")
+                logger.info(f"🤖 Response length: {len(ai_response)} characters")
+                
                 call.ai_response = ai_response
                 db.session.commit()
+                logger.info(f"✅ AI response saved to database for call {call.id}")
                 
                 # Generate TTS audio
+                logger.info(f"🔄 Triggering TTS audio generation for call {call.id}")
                 self._generate_tts_audio(call, ai_response)
+            else:
+                logger.error(f"❌ No AI response generated for call {call.id}")
                 
         except Exception as e:
-            logger.error(f"Failed to generate AI response: {e}")
+            logger.error(f"❌ Failed to generate AI response for call {call.id}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"AI response error traceback: {traceback.format_exc()}")
     
     def _generate_tts_audio(self, call: Call, text: str):
         """Generate TTS audio for call"""
+        logger.info("=== GENERATING TTS AUDIO ===")
+        logger.info(f"🔊 Generating TTS audio for call {call.id}")
+        logger.info(f"🔊 Input text: {text}")
+        logger.info(f"🔊 Text length: {len(text)} characters")
+        
         try:
             if not self.tts_manager:
-                logger.error("TTS manager not available")
+                logger.error("❌ TTS manager not available")
                 return
             
             settings = Settings.get_settings()
+            logger.info(f"🔊 Using TTS engine: {settings.tts_engine}")
+            logger.info(f"🔊 Using TTS voice: {settings.tts_voice}")
             
             # Create audio output directory
             audio_dir = self.config.get('AUDIO_OUTPUT_DIR', 'audio_output')
             os.makedirs(audio_dir, exist_ok=True)
+            logger.info(f"🔊 Audio output directory: {audio_dir}")
             
             # Generate audio filename
             audio_filename = os.path.join(audio_dir, f"call_{call.id}_{int(time.time())}.wav")
+            logger.info(f"🔊 Audio filename: {audio_filename}")
             
             # Generate TTS audio
+            logger.info(f"🔊 Starting TTS synthesis...")
             success = self.tts_manager.synthesize(
                 text=text,
                 engine_name=settings.tts_engine,
@@ -670,24 +849,41 @@ def create_app(config_name='default'):
             )
             
             if success:
+                logger.info(f"✅ TTS synthesis completed successfully")
+                logger.info(f"🔊 Audio file saved: {audio_filename}")
+                
                 call.audio_filename = audio_filename
                 call.tts_voice = settings.tts_voice
                 db.session.commit()
+                logger.info(f"✅ Audio filename saved to database for call {call.id}")
                 
                 # Play audio to call
                 if self.sip_client and hasattr(self, '_call_mapping'):
+                    logger.info(f"🔊 Attempting to play audio to call...")
                     # Find call ID from database ID
                     for sip_call_id, db_call_id in self._call_mapping.items():
                         if db_call_id == call.id:
-                            self.sip_client.play_audio(sip_call_id, audio_filename)
+                            logger.info(f"🔊 Found SIP call ID {sip_call_id} for DB call {call.id}")
+                            play_result = self.sip_client.play_audio(sip_call_id, audio_filename)
+                            if play_result:
+                                logger.info(f"✅ Audio played successfully to call {sip_call_id}")
+                            else:
+                                logger.error(f"❌ Failed to play audio to call {sip_call_id}")
                             break
+                    else:
+                        logger.warning(f"⚠️ No SIP call ID found for DB call {call.id}")
+                else:
+                    logger.warning(f"⚠️ SIP client not available or no call mapping for call {call.id}")
                 
-                logger.info(f"TTS audio generated: {audio_filename}")
+                logger.info(f"✅ TTS audio generation completed for call {call.id}")
             else:
-                logger.error("Failed to generate TTS audio")
+                logger.error(f"❌ TTS synthesis failed for call {call.id}")
                 
         except Exception as e:
-            logger.error(f"Failed to generate TTS audio: {e}")
+            logger.error(f"❌ Failed to generate TTS audio for call {call.id}: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"TTS error traceback: {traceback.format_exc()}")
     
     return app
 

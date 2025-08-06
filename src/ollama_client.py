@@ -3,8 +3,11 @@ import logging
 import json
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
+from datetime import datetime
 
-logger = logging.getLogger(__name__)
+# Configure comprehensive logging for Ollama client
+ollama_logger = logging.getLogger('ollama')
+ollama_logger.setLevel(logging.DEBUG)
 
 class OllamaClient:
     """Client for communicating with Ollama API"""
@@ -16,24 +19,32 @@ class OllamaClient:
         Args:
             base_url: Base URL of Ollama server
         """
+        ollama_logger.info("=== INITIALIZING OLLAMA CLIENT ===")
+        ollama_logger.info(f"🤖 Initializing Ollama client with URL: {base_url}")
+        
         # Ensure base_url is properly formatted
         if not base_url:
             base_url = 'http://localhost:11434'
+            ollama_logger.info(f"🤖 Using default URL: {base_url}")
         
         # Remove trailing slash and ensure proper URL format
         self.base_url = base_url.rstrip('/')
+        ollama_logger.info(f"🤖 Cleaned base URL: {self.base_url}")
         
         # Validate URL format
         if not self.base_url.startswith(('http://', 'https://')):
             self.base_url = f'http://{self.base_url}'
+            ollama_logger.info(f"🤖 Added http:// prefix: {self.base_url}")
         
-        logger.info(f"Initializing Ollama client with URL: {self.base_url}")
+        ollama_logger.info(f"🤖 Final Ollama URL: {self.base_url}")
         
         self.session = requests.Session()
         self.session.headers.update({
             'Content-Type': 'application/json',
             'User-Agent': 'CallBot/1.0'
         })
+        ollama_logger.info("🤖 HTTP session configured with headers")
+        ollama_logger.info("✅ Ollama client initialized successfully")
     
     def _make_request(self, endpoint: str, method: str = 'GET', data: Optional[Dict] = None) -> Optional[Dict]:
         """
@@ -49,31 +60,50 @@ class OllamaClient:
         """
         url = urljoin(self.base_url, endpoint)
         
+        ollama_logger.info(f"🌐 Making {method} request to: {url}")
+        if data:
+            ollama_logger.debug(f"🌐 Request data: {data}")
+        
         try:
-            logger.debug(f"Making {method} request to: {url}")
+            start_time = datetime.now()
             
             if method.upper() == 'GET':
+                ollama_logger.debug(f"🌐 Sending GET request...")
                 response = self.session.get(url, timeout=30)
             elif method.upper() == 'POST':
+                ollama_logger.debug(f"🌐 Sending POST request...")
                 response = self.session.post(url, json=data, timeout=30)
             else:
-                logger.error(f"Unsupported HTTP method: {method}")
+                ollama_logger.error(f"❌ Unsupported HTTP method: {method}")
                 return None
             
+            response_time = (datetime.now() - start_time).total_seconds()
+            ollama_logger.info(f"🌐 Response received in {response_time:.2f}s")
+            ollama_logger.info(f"🌐 Response status: {response.status_code}")
+            
             response.raise_for_status()
-            return response.json()
+            
+            try:
+                response_data = response.json()
+                ollama_logger.info(f"✅ Request successful - Response size: {len(str(response_data))} chars")
+                return response_data
+            except json.JSONDecodeError as e:
+                ollama_logger.error(f"❌ Failed to parse JSON response: {e}")
+                ollama_logger.error(f"❌ Response text: {response.text[:200]}...")
+                return None
             
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"Connection failed to {url}: {e}")
+            ollama_logger.error(f"❌ Connection failed to {url}: {e}")
             return None
         except requests.exceptions.Timeout as e:
-            logger.error(f"Request timeout to {url}: {e}")
+            ollama_logger.error(f"❌ Request timeout to {url}: {e}")
             return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed to {url}: {e}")
+            ollama_logger.error(f"❌ Request failed to {url}: {e}")
+            ollama_logger.error(f"❌ Response status: {response.status_code if 'response' in locals() else 'Unknown'}")
             return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response from {url}: {e}")
+        except Exception as e:
+            ollama_logger.error(f"❌ Unexpected error during request: {e}")
             return None
     
     def generate_response(self, prompt: str, model: str, 
@@ -111,7 +141,7 @@ class OllamaClient:
         if response and 'response' in response:
             return response['response'].strip()
         
-        logger.error(f"Failed to generate response: {response}")
+        ollama_logger.error(f"Failed to generate response: {response}")
         return None
     
     def list_models(self) -> Optional[list]:
@@ -126,7 +156,7 @@ class OllamaClient:
         if response and 'models' in response:
             return [model['name'] for model in response['models']]
         
-        logger.error(f"Failed to get models: {response}")
+        ollama_logger.error(f"Failed to get models: {response}")
         return None
     
     def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
@@ -145,7 +175,7 @@ class OllamaClient:
         if response:
             return response
         
-        logger.error(f"Failed to get model info for {model_name}")
+        ollama_logger.error(f"Failed to get model info for {model_name}")
         return None
     
     def check_server_status(self) -> bool:
@@ -157,16 +187,16 @@ class OllamaClient:
         """
         try:
             url = f"{self.base_url}/api/tags"
-            logger.debug(f"Checking server status at: {url}")
+            ollama_logger.debug(f"Checking server status at: {url}")
             response = self.session.get(url, timeout=5)
             if response.status_code == 200:
-                logger.debug(f"Server status check successful: {response.status_code}")
+                ollama_logger.debug(f"Server status check successful: {response.status_code}")
                 return True
             else:
-                logger.warning(f"Server status check failed with status code: {response.status_code}")
+                ollama_logger.warning(f"Server status check failed with status code: {response.status_code}")
                 return False
         except requests.exceptions.RequestException as e:
-            logger.debug(f"Server status check failed: {e}")
+            ollama_logger.debug(f"Server status check failed: {e}")
             return False
     
     def test_connection(self) -> Dict[str, Any]:
@@ -184,29 +214,29 @@ class OllamaClient:
         }
         
         try:
-            logger.info(f"Testing connection to Ollama server at: {self.base_url}")
+            ollama_logger.info(f"Testing connection to Ollama server at: {self.base_url}")
             
             # Check if server is running
             if not self.check_server_status():
                 status['error'] = f'Server not reachable at {self.base_url}'
-                logger.error(f"Ollama server not reachable at {self.base_url}")
+                ollama_logger.error(f"Ollama server not reachable at {self.base_url}")
                 return status
             
             status['connected'] = True
-            logger.info(f"Successfully connected to Ollama server at {self.base_url}")
+            ollama_logger.info(f"Successfully connected to Ollama server at {self.base_url}")
             
             # Get available models
             models = self.list_models()
             if models:
                 status['models'] = models
-                logger.info(f"Found {len(models)} models: {', '.join(models)}")
+                ollama_logger.info(f"Found {len(models)} models: {', '.join(models)}")
             else:
                 status['error'] = 'Failed to retrieve models'
-                logger.error("Failed to retrieve models from Ollama server")
+                ollama_logger.error("Failed to retrieve models from Ollama server")
             
         except Exception as e:
             status['error'] = str(e)
-            logger.error(f"Exception during connection test: {e}")
+            ollama_logger.error(f"Exception during connection test: {e}")
         
         return status
     
@@ -223,6 +253,12 @@ class OllamaClient:
         Returns:
             AI response or None if generation failed
         """
+        ollama_logger.info("=== GENERATING AI RESPONSE WITH CONTEXT ===")
+        ollama_logger.info(f"🤖 Input transcript: {transcript}")
+        ollama_logger.info(f"🤖 Transcript length: {len(transcript)} characters")
+        ollama_logger.info(f"🤖 Using model: {model}")
+        ollama_logger.info(f"🤖 Context provided: {context is not None}")
+        
         # Default system prompt for call bot
         system_prompt = """You are a helpful AI assistant answering phone calls. 
         Respond naturally and conversationally to the caller's questions and requests. 
@@ -230,14 +266,28 @@ class OllamaClient:
         
         if context:
             system_prompt = context
+            ollama_logger.info(f"🤖 Using custom context: {context[:100]}...")
+        else:
+            ollama_logger.info(f"🤖 Using default system prompt")
         
         # Create a conversational prompt
         prompt = f"Caller says: {transcript}\n\nAssistant:"
+        ollama_logger.info(f"🤖 Generated prompt: {prompt[:100]}...")
         
-        return self.generate_response(
+        ollama_logger.info(f"🤖 Calling generate_response with model {model}")
+        response = self.generate_response(
             prompt=prompt,
             model=model,
             system_prompt=system_prompt,
             temperature=0.7,
             max_tokens=200
-        ) 
+        )
+        
+        if response:
+            ollama_logger.info(f"✅ AI response generated successfully")
+            ollama_logger.info(f"🤖 Response: {response}")
+            ollama_logger.info(f"🤖 Response length: {len(response)} characters")
+        else:
+            ollama_logger.error(f"❌ Failed to generate AI response")
+        
+        return response 
