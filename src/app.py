@@ -89,9 +89,9 @@ def create_app(config_name='default'):
                 # Set SIP callbacks
                 logger.info("Setting SIP callbacks...")
                 app.sip_client.set_callbacks(
-                    on_incoming_call=app._handle_incoming_call,
-                    on_call_transcript=app._handle_call_transcript,
-                    on_call_end=app._handle_call_end
+                    on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
+                    on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
+                    on_call_end=lambda call_id: app._handle_call_end(call_id)
                 )
                 logger.info("SIP callbacks set successfully")
                 
@@ -216,9 +216,9 @@ def create_app(config_name='default'):
                             )
                             
                             app.sip_client.set_callbacks(
-                                on_incoming_call=app._handle_incoming_call,
-                                on_call_transcript=app._handle_call_transcript,
-                                on_call_end=app._handle_call_end
+                                on_incoming_call=lambda call_id, caller_id: app._handle_incoming_call(call_id, caller_id),
+                                on_call_transcript=lambda call_id, transcript: app._handle_call_transcript(call_id, transcript),
+                                on_call_end=lambda call_id: app._handle_call_end(call_id)
                             )
                             
                             if app.sip_client.register():

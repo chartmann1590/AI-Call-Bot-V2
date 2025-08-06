@@ -171,6 +171,27 @@ class SIPClient:
         except Exception as e:
             logger.error(f"Failed to initialize pyVoIP: {e}")
             logger.error(f"Exception type: {type(e)}")
+            
+            # Try alternative port if port binding fails
+            if "Address already in use" in str(e) or "Errno 98" in str(e):
+                logger.error("Port binding error - trying alternative approach")
+                try:
+                    # Try with a different port
+                    alternative_port = self.port + 1
+                    logger.info(f"Trying alternative port: {alternative_port}")
+                    self.phone = VoIPPhone(
+                        self.domain, 
+                        alternative_port, 
+                        self.username, 
+                        self.password,
+                        callCallback=self._on_incoming_call
+                    )
+                    self.port = alternative_port
+                    logger.info(f"Real pyVoIP library initialized with alternative port {self.port}")
+                except Exception as retry_e:
+                    logger.error(f"Alternative port also failed: {retry_e}")
+                    raise
+            
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
@@ -223,6 +244,25 @@ class SIPClient:
                     return True
                 except Exception as retry_e:
                     logger.error(f"Alternative approach also failed: {retry_e}")
+                    # Try one more time with a different port
+                    try:
+                        alternative_port = self.port + 2
+                        logger.info(f"Trying with port {alternative_port}")
+                        # Reinitialize with new port
+                        self.phone = VoIPPhone(
+                            self.domain, 
+                            alternative_port, 
+                            self.username, 
+                            self.password,
+                            callCallback=self._on_incoming_call
+                        )
+                        self.port = alternative_port
+                        self.phone.start()
+                        self.registered = True
+                        logger.info(f"Registration successful with alternative port {self.port}")
+                        return True
+                    except Exception as final_e:
+                        logger.error(f"Final attempt also failed: {final_e}")
             
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
