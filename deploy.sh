@@ -510,12 +510,6 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-    ports:
-      - "5000:5000"  # Web interface
-      - "5070:5070/udp"  # SIP port
-      - "10000-20000:10000-20000/udp"  # RTP ports for audio
-    networks:
-      - callbot-network
 
   # Ollama AI service (optional - for local Ollama)
   ollama:

@@ -6,10 +6,6 @@ services:
     build: .
     container_name: callbot-app
     network_mode: "host"  # This allows direct network access
-    ports:
-      - "5000:5000"  # Web interface
-      - "5070:5070/udp"  # SIP port
-      - "10000-20000:10000-20000/udp"  # RTP ports for audio
     environment:
       - FLASK_ENV=production
       - SECRET_KEY=your-secret-key-change-in-production
@@ -30,8 +26,6 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-    networks:
-      - callbot-network
 
   # Ollama AI service (optional - can use remote Ollama instead)
   ollama:
