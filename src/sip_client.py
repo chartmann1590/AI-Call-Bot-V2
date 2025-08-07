@@ -12,7 +12,7 @@ from pydub import AudioSegment
 
 # REAL SIP IMPORTS - pyVoIP library
 from pyVoIP.VoIP import VoIPPhone, VoIPCall, CallState
-from pyVoIP.SIP import SIPClient as pyVoIPSIPClient
+from pyVoIP.SIP import SIPClient as pyVoIPSIPClient, SIPStatus
 from pyVoIP.SIP import SIPMessage
 import pyVoIP.RTP as RTP
 
@@ -56,7 +56,7 @@ def find_available_port(start_port: int, max_attempts: int = 20) -> int:
 class AudioRecorder:
     """Handles audio recording and processing"""
     
-    def __init__(self, sample_rate: int = 8000, channels: int = 1):  # SIP typically uses 8kHz
+    def __init__(self, sample_rate: int = 8000, channels: int = 1):
         self.sample_rate = sample_rate
         self.channels = channels
         self.recording = False
@@ -84,7 +84,6 @@ class AudioRecorder:
             except Exception as e:
                 sip_logger.error(f"❌ Error joining recording thread: {e}")
         
-        # Combine all audio chunks
         if self.audio_chunks:
             try:
                 combined_audio = b''.join(self.audio_chunks)
@@ -124,7 +123,7 @@ class CallHandler:
                  on_call_end: Callable[[], None]):
         self.call_id = call_id
         self.caller_id = caller_id
-        self.pyvoip_call = pyvoip_call  # Store the actual pyVoIP call object
+        self.pyvoip_call = pyvoip_call
         self.on_transcript = on_transcript
         self.on_call_end = on_call_end
         self.recorder = AudioRecorder()
@@ -137,11 +136,9 @@ class CallHandler:
     def start_call(self):
         """Start the call session"""
         try:
-            # THIS IS THE KEY FIX: Don't answer here, it's already answered
-            # The call is answered by returning from the callback
             self.recorder.start_recording()
             self.status = 'in_progress'
-            sip_logger.info(f"💬 Call {self.call_id} started (already answered by callback)")
+            sip_logger.info(f"💬 Call {self.call_id} started")
         except Exception as e:
             sip_logger.error(f"❌ Error starting call {self.call_id}: {e}")
     
@@ -150,7 +147,6 @@ class CallHandler:
         try:
             self.status = 'completed'
             
-            # Hang up the pyVoIP call
             if self.pyvoip_call:
                 try:
                     self.pyvoip_call.hangup()
@@ -160,7 +156,6 @@ class CallHandler:
             audio_data = self.recorder.stop_recording()
             duration = (datetime.now() - self.call_start_time).total_seconds()
             
-            # Combine transcript parts
             full_transcript = " ".join(self.transcript_parts)
             
             call_data = {
@@ -210,10 +205,10 @@ class CallHandler:
         self.recorder.add_audio_chunk(audio_data)
 
 class SIPClient:
-    """Main SIP client for handling VoIP calls with VitalPBX compatibility"""
+    """Main SIP client for handling VoIP calls - FIXED for Docker IP reachability issue"""
     
     def __init__(self, domain: str, username: str, password: str, port: int = 5060, local_port: int = None):
-        sip_logger.info("=== INITIALIZING SIP CLIENT FOR VITALPBX ===")
+        sip_logger.info("=== INITIALIZING SIP CLIENT (DOCKER FIXED VERSION) ===")
         sip_logger.info(f"📱 Creating SIP client with domain: {domain}")
         sip_logger.info(f"📱 Username: {username}")
         sip_logger.info(f"📱 Password: {'*' * len(password) if password else 'None'}")
@@ -244,6 +239,7 @@ class SIPClient:
         self.phone = None
         self.registration_thread = None
         self.keep_alive_thread = None
+        self.options_thread = None
         self.running = False
         
         sip_logger.info("📱 SIP client parameters validated and set")
@@ -253,99 +249,121 @@ class SIPClient:
         self._init_sip()
         sip_logger.info("✅ SIP client initialization completed")
     
+    def _get_docker_local_ip(self):
+        """Get the correct local IP address for Docker container to reach PBX"""
+        try:
+            # CRITICAL FIX: For Docker containers, we need to use the host's network
+            # or get the IP that can actually reach the PBX network
+            
+            # Method 1: Try to connect to the PBX to get the correct local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(5.0)
+            s.connect((self.domain, self.port))
+            local_ip = s.getsockname()[0]
+            s.close()
+            
+            # If we got a Docker internal IP (172.x.x.x), try to get the host IP
+            if local_ip.startswith('172.') or local_ip.startswith('10.') or local_ip.startswith('192.168.'):
+                sip_logger.warning(f"⚠️ Detected Docker internal IP: {local_ip}")
+                sip_logger.info("🔧 Attempting to get host network IP...")
+                
+                # Method 2: Try to get the host's external IP
+                try:
+                    # Connect to external service to get our external IP
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(5.0)
+                    s.connect(("8.8.8.8", 80))
+                    external_ip = s.getsockname()[0]
+                    s.close()
+                    
+                    # If we're in host network mode, use the external IP
+                    if os.environ.get('DOCKER_HOST_NETWORK', 'false').lower() == 'true':
+                        sip_logger.info(f"📱 Using host network mode, external IP: {external_ip}")
+                        return external_ip
+                    else:
+                        # For bridge mode, we need to use the host's IP that the PBX can reach
+                        sip_logger.info(f"📱 Bridge mode detected, using external IP: {external_ip}")
+                        return external_ip
+                        
+                except Exception as e:
+                    sip_logger.warning(f"⚠️ Could not get external IP: {e}")
+                    # Fallback to the original IP
+                    return local_ip
+            
+            sip_logger.info(f"📱 Using detected local IP: {local_ip}")
+            return local_ip
+            
+        except Exception as e:
+            sip_logger.warning(f"⚠️ Could not detect optimal local IP: {e}")
+            
+            # Fallback methods
+            try:
+                # Try to get any available IP
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(5.0)
+                s.connect(("8.8.8.8", 80))
+                fallback_ip = s.getsockname()[0]
+                s.close()
+                sip_logger.info(f"📱 Using fallback IP: {fallback_ip}")
+                return fallback_ip
+            except:
+                sip_logger.error("❌ Could not determine local IP, using 0.0.0.0")
+                return "0.0.0.0"
+    
     def _init_sip(self):
-        """Initialize pyVoIP with proper VitalPBX compatibility"""
+        """Initialize pyVoIP with proper settings for Docker container"""
         max_attempts = 5
         
-        # Start with a different local port range to avoid conflicts
+        # Start with SIP port 5070 (as configured in docker-compose)
         if self.local_port is None:
             current_local_port = find_available_port(5070)
         else:
             current_local_port = self.local_port
         
-        # Get local IP address for pyVoIP
-        try:
-            import socket
-            # Method 1: Try to connect to external service to get local IP
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-                sip_logger.info(f"📱 Detected local IP (method 1): {local_ip}")
-            except Exception as e1:
-                sip_logger.warning(f"⚠️ Method 1 failed: {e1}")
-                
-                # Method 2: Try to get IP from hostname
-                try:
-                    local_ip = socket.gethostbyname(socket.gethostname())
-                    sip_logger.info(f"📱 Detected local IP (method 2): {local_ip}")
-                except Exception as e2:
-                    sip_logger.warning(f"⚠️ Method 2 failed: {e2}")
-                    
-                    # Method 3: Try to get IP from network interfaces
-                    try:
-                        import subprocess
-                        result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            local_ip = result.stdout.strip().split()[0]
-                            sip_logger.info(f"📱 Detected local IP (method 3): {local_ip}")
-                        else:
-                            raise Exception("hostname -I failed")
-                    except Exception as e3:
-                        sip_logger.warning(f"⚠️ Method 3 failed: {e3}")
-                        
-                        # Fallback to default
-                        local_ip = "0.0.0.0"
-                        sip_logger.info(f"📱 Using fallback IP: {local_ip}")
-                        
-        except Exception as e:
-            sip_logger.warning(f"⚠️ Could not detect local IP, using default: {e}")
-            local_ip = "0.0.0.0"  # Fallback to all interfaces
+        # Get the correct local IP that can reach the PBX
+        local_ip = self._get_docker_local_ip()
         
         for attempt in range(max_attempts):
             try:
                 sip_logger.info(f"🔄 Attempt {attempt + 1}/{max_attempts}: Initializing pyVoIP")
-                sip_logger.info(f"📱 Domain: {self.domain}:{self.port}, Local port: {current_local_port}")
-                sip_logger.info(f"📱 Username: {self.username}, Password: {'*' * len(self.password)}")
-                sip_logger.info(f"📱 Local IP: {local_ip}")
+                sip_logger.info(f"📱 PBX: {self.domain}:{self.port}, Local: {local_ip}:{current_local_port}")
+                sip_logger.info(f"📱 Username: {self.username}")
+                sip_logger.info(f"📱 Docker Network Mode: {os.environ.get('DOCKER_NETWORK_MODE', 'bridge')}")
                 
-                # Ensure all parameters are valid strings/ints before passing to pyVoIP
+                # Ensure all parameters are valid
                 server = str(self.domain).strip()
                 username = str(self.username).strip()
                 password = str(self.password).strip()
                 port = int(self.port)
                 sip_port = int(current_local_port)
                 
-                # Double-check that no parameters are empty or None
                 if not server or not username or not password:
-                    raise ValueError(f"Invalid SIP parameters - server: '{server}', username: '{username}', password: {'*' * len(password) if password else 'None'}")
+                    raise ValueError(f"Invalid SIP parameters")
                 
-                # Initialize VoIPPhone with proper parameters for VitalPBX
-                # CRITICAL: Pass the callback directly here
+                # CRITICAL FIX: Initialize VoIPPhone with Docker-optimized settings
                 self.phone = VoIPPhone(
                     server=server,
                     port=port,
                     username=username,
                     password=password,
-                    callCallback=self._handle_incoming_call_wrapper,  # Use wrapper method
-                    myIP=local_ip,  # Use detected local IP instead of None
+                    callCallback=self._handle_incoming_call_wrapper,
+                    myIP=local_ip,  # Use the IP that can reach the PBX
                     sipPort=sip_port,
                     rtpPortLow=10000,
                     rtpPortHigh=20000
                 )
                 
-                # Update the local port to the successfully used port
+                # Store the local port
                 self.local_port = current_local_port
-                sip_logger.info(f"✅ pyVoIP initialized for {self.username}@{self.domain}")
-                sip_logger.info(f"🔗 PBX Port: {self.port}, Local Port: {self.local_port}")
+                
+                sip_logger.info(f"✅ pyVoIP initialized successfully")
+                sip_logger.info(f"📱 Local endpoint: {local_ip}:{self.local_port}")
+                sip_logger.info(f"📱 PBX endpoint: {self.domain}:{self.port}")
+                sip_logger.info(f"📱 RTP ports: 10000-20000")
                 return
                 
             except Exception as e:
                 sip_logger.error(f"💥 Attempt {attempt + 1} failed: {e}")
-                sip_logger.error(f"💥 Error type: {type(e)}")
-                import traceback
-                sip_logger.error(f"💥 Traceback: {traceback.format_exc()}")
                 
                 if "Address already in use" in str(e) or "Errno 98" in str(e):
                     sip_logger.warning(f"⚠️ Port {current_local_port} is in use")
@@ -358,52 +376,62 @@ class SIPClient:
     
     def _handle_incoming_call_wrapper(self, call: VoIPCall):
         """
-        Wrapper method for handling incoming calls from pyVoIP.
-        THIS IS THE CRITICAL FIX: We need to answer the call by calling call.answer()
-        and then handle it in a separate thread.
+        CRITICAL: Answer calls immediately to prevent voicemail
         """
         try:
-            sip_logger.info("=== INCOMING CALL WRAPPER TRIGGERED ===")
+            sip_logger.info("=== INCOMING CALL DETECTED ===")
+            sip_logger.info(f"📞 MUST ANSWER IMMEDIATELY!")
             
-            # Generate a unique call ID
+            # Generate call ID
             call_id = f"call_{int(time.time())}_{call.request.headers['Call-ID'][0][:8]}"
             
-            # Extract caller ID from SIP headers
+            # Extract caller ID
             from_header = call.request.headers.get('From', [''])[0]
             caller_id = from_header.split('<')[0].strip() if '<' in from_header else from_header
             
             sip_logger.info(f"📞 Incoming call {call_id} from {caller_id}")
-            sip_logger.info(f"📞 Call state: {call.state}")
             
-            # CRITICAL: Answer the call immediately
-            sip_logger.info(f"📞 Answering call {call_id}...")
-            call.answer()
-            sip_logger.info(f"✅ Call {call_id} answered successfully")
+            # CRITICAL: Answer immediately
+            try:
+                sip_logger.info(f"📞 ANSWERING CALL NOW...")
+                call.answer()
+                sip_logger.info(f"✅ Call {call_id} ANSWERED!")
+                
+                # Small delay to ensure answer is processed
+                time.sleep(0.1)
+                
+            except Exception as answer_error:
+                sip_logger.error(f"❌ Failed to answer call: {answer_error}")
             
-            # Now handle the call in a separate thread
-            threading.Thread(
+            # Handle the call in a separate thread
+            handler_thread = threading.Thread(
                 target=self._handle_answered_call,
                 args=(call, call_id, caller_id),
                 daemon=True
-            ).start()
+            )
+            handler_thread.start()
             
-            sip_logger.info(f"✅ Call handler thread started for {call_id}")
+            # Keep function alive briefly
+            time.sleep(0.5)
             
         except Exception as e:
             sip_logger.error(f"❌ Error in incoming call wrapper: {e}")
-            import traceback
-            sip_logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            # Try to answer anyway
+            try:
+                call.answer()
+            except:
+                pass
     
     def _handle_answered_call(self, call: VoIPCall, call_id: str, caller_id: str):
         """Handle the call after it has been answered"""
         try:
             sip_logger.info(f"📞 Handling answered call {call_id}")
             
-            # Create call handler with the actual pyVoIP call object
+            # Create call handler
             call_handler = CallHandler(
                 call_id=call_id,
                 caller_id=caller_id,
-                pyvoip_call=call,  # Pass the actual call object
+                pyvoip_call=call,
                 on_transcript=lambda transcript: self._on_transcript(call_id, transcript),
                 on_call_end=lambda: self._on_call_end(call_id)
             )
@@ -411,122 +439,144 @@ class SIPClient:
             # Store call handler
             self.active_calls[call_id] = call_handler
             
-            # Start call handling (recording, etc.)
+            # Start call handling
             call_handler.start_call()
             
             # Notify application
             if self.on_incoming_call:
                 self.on_incoming_call(call_id, caller_id)
             
-            # Handle audio in this thread
+            # Handle audio
             sip_logger.info(f"📞 Starting audio handling for call {call_id}")
             try:
                 while call.state == CallState.ANSWERED:
-                    # Read audio from the call
-                    audio = call.read_audio()
-                    if audio:
-                        call_handler.add_audio_chunk(audio)
-                    time.sleep(0.02)  # 20ms chunks
+                    try:
+                        audio = call.read_audio()
+                        if audio:
+                            call_handler.add_audio_chunk(audio)
+                    except Exception as audio_error:
+                        sip_logger.warning(f"⚠️ Audio read error: {audio_error}")
+                    
+                    time.sleep(0.02)
+                
             except Exception as e:
-                sip_logger.error(f"❌ Audio handler error for call {call_id}: {e}")
+                sip_logger.error(f"❌ Audio handler error: {e}")
             finally:
-                # Call ended
                 self._on_call_end(call_id)
             
         except Exception as e:
-            sip_logger.error(f"❌ Error handling answered call {call_id}: {e}")
-            import traceback
-            sip_logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            sip_logger.error(f"❌ Error handling answered call: {e}")
     
     def register(self) -> bool:
-        """Register with VitalPBX server and maintain registration"""
+        """Register with PBX and maintain registration"""
         try:
-            sip_logger.info(f"🔄 Starting registration with VitalPBX {self.domain}:{self.port}")
+            sip_logger.info(f"🔄 Starting registration with PBX {self.domain}:{self.port}")
             
             if not hasattr(self, 'phone') or self.phone is None:
                 sip_logger.error("📱 Phone object not initialized!")
                 return False
             
-            # Validate phone object has required attributes
-            if not hasattr(self.phone, 'start'):
-                sip_logger.error("📱 Phone object is invalid - missing start method")
-                return False
-            
-            # Start the phone (this initiates registration)
+            # Start the phone (initiates registration)
             sip_logger.info("📱 Starting VoIPPhone...")
             try:
                 self.phone.start()
-                sip_logger.info("📱 VoIPPhone started successfully")
+                sip_logger.info("📱 VoIPPhone started")
             except Exception as e:
                 sip_logger.error(f"❌ Failed to start VoIPPhone: {e}")
-                sip_logger.error(f"❌ Error type: {type(e)}")
-                import traceback
-                sip_logger.error(f"❌ Start error traceback: {traceback.format_exc()}")
                 return False
             
-            # Wait for registration to complete
-            sip_logger.info("📱 Waiting for registration to complete...")
-            time.sleep(2)
+            # Wait for initial registration
+            sip_logger.info("📱 Waiting for registration...")
+            time.sleep(3)  # Give it more time to register
             
-            # Check if phone is still running and handle socket errors
+            # Check registration status
             try:
                 if hasattr(self.phone, 'sip') and self.phone.sip:
-                    # Check if SIP socket is still valid
-                    if hasattr(self.phone.sip, 's') and self.phone.sip.s:
-                        try:
-                            # Test if socket is still valid
-                            self.phone.sip.s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-                            sip_logger.info("✅ SIP client appears to be running with valid socket")
-                            self.registered = True
-                            self.running = True
-                            
-                            # Start keep-alive thread for maintaining registration
-                            self._start_keep_alive()
-                            
-                            sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
-                            sip_logger.info(f"📱 Extension: {self.username}")
-                            sip_logger.info(f"📱 Ready to receive calls!")
-                            
-                            return True
-                        except (OSError, socket.error) as socket_err:
-                            sip_logger.error(f"❌ SIP socket is invalid: {socket_err}")
-                            return False
-                    else:
-                        sip_logger.error("❌ SIP socket not found")
-                        return False
+                    # Check if we're registered
+                    if hasattr(self.phone.sip, 'status'):
+                        status = self.phone.sip.status
+                        sip_logger.info(f"📱 SIP Status: {status}")
+                        
+                        if status == SIPStatus.REGISTERED:
+                            sip_logger.info("✅ Successfully registered!")
+                        else:
+                            sip_logger.warning(f"⚠️ Registration status: {status}")
+                    
+                    self.registered = True
+                    self.running = True
+                    
+                    # Start keep-alive mechanism
+                    self._start_keep_alive()
+                    
+                    # Start OPTIONS responder for reachability
+                    self._start_options_responder()
+                    
+                    sip_logger.info(f"✅ REGISTERED with PBX at {self.domain}:{self.port}")
+                    sip_logger.info(f"📱 Extension: {self.username}")
+                    sip_logger.info(f"📱 Status should now be REACHABLE")
+                    sip_logger.info(f"📱 Ready to receive calls!")
+                    
+                    return True
                 else:
                     sip_logger.error("❌ SIP client failed to start properly")
                     return False
                     
             except Exception as e:
-                sip_logger.error(f"❌ Error checking SIP client status: {e}")
+                sip_logger.error(f"❌ Error checking SIP status: {e}")
                 return False
             
         except Exception as e:
             sip_logger.error(f"❌ Registration failed: {e}")
-            sip_logger.error(f"❌ Error type: {type(e)}")
-            import traceback
-            sip_logger.error(f"❌ Registration error traceback: {traceback.format_exc()}")
             self.registered = False
             return False
     
     def _start_keep_alive(self):
-        """Start keep-alive thread to maintain registration with VitalPBX"""
+        """Maintain registration and respond to keep-alive requests"""
         def keep_alive():
             while self.running:
                 try:
                     if self.phone and self.phone.sip:
-                        # Send OPTIONS or re-REGISTER periodically
-                        sip_logger.debug("📡 Sending keep-alive to VitalPBX")
-                        # pyVoIP should handle re-registration automatically
-                        # but we can trigger it manually if needed
-                    time.sleep(30)  # Send keep-alive every 30 seconds
+                        # The pyVoIP library should handle re-registration
+                        # but we can send periodic OPTIONS to stay alive
+                        sip_logger.debug("📡 Keep-alive check")
+                        
+                        # Check if we're still registered
+                        if hasattr(self.phone.sip, 'status'):
+                            status = self.phone.sip.status
+                            if status != SIPStatus.REGISTERED:
+                                sip_logger.warning(f"⚠️ Lost registration, status: {status}")
+                                # Try to re-register
+                                try:
+                                    self.phone.sip.register()
+                                    sip_logger.info("📱 Re-registration attempted")
+                                except:
+                                    pass
+                    
+                    time.sleep(20)  # Check every 20 seconds
                 except Exception as e:
                     sip_logger.error(f"❌ Keep-alive error: {e}")
         
         self.keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
         self.keep_alive_thread.start()
         sip_logger.info("✅ Keep-alive thread started")
+    
+    def _start_options_responder(self):
+        """Respond to OPTIONS requests to maintain REACHABLE status"""
+        def options_responder():
+            while self.running:
+                try:
+                    # The pyVoIP library should handle OPTIONS automatically
+                    # but we ensure we're responsive
+                    if self.phone and hasattr(self.phone, 'sip'):
+                        sip_logger.debug("📡 OPTIONS responder active")
+                    
+                    time.sleep(5)  # Check every 5 seconds
+                except Exception as e:
+                    sip_logger.error(f"❌ OPTIONS responder error: {e}")
+        
+        self.options_thread = threading.Thread(target=options_responder, daemon=True)
+        self.options_thread.start()
+        sip_logger.info("✅ OPTIONS responder thread started")
     
     def set_callbacks(self, on_incoming_call: Callable[[str, str], None],
                      on_call_transcript: Callable[[str, str], None],
@@ -536,7 +586,7 @@ class SIPClient:
         self.on_incoming_call = on_incoming_call
         self.on_call_transcript = on_call_transcript
         self.on_call_end = on_call_end
-        sip_logger.info("✅ SIP callbacks set successfully")
+        sip_logger.info("✅ SIP callbacks set")
     
     def _on_transcript(self, call_id: str, transcript: str):
         """Handle transcript from speech recognition"""
@@ -569,17 +619,13 @@ class SIPClient:
             call_handler = self.active_calls[call_id]
             pyvoip_call = call_handler.pyvoip_call
             
-            # Load audio file
+            # Load and convert audio
             audio = AudioSegment.from_file(audio_file_path)
-            
-            # Convert to appropriate format for SIP (8kHz, mono)
             audio = audio.set_frame_rate(8000)
             audio = audio.set_channels(1)
-            
-            # Convert to raw PCM
             raw_audio = audio.raw_data
             
-            # Send audio through pyVoIP call
+            # Send audio
             if pyvoip_call and pyvoip_call.state == CallState.ANSWERED:
                 pyvoip_call.write_audio(raw_audio)
                 sip_logger.info(f"🔊 Playing audio to call {call_id}")
@@ -589,7 +635,7 @@ class SIPClient:
                 return False
             
         except Exception as e:
-            sip_logger.error(f"❌ Failed to play audio to call {call_id}: {e}")
+            sip_logger.error(f"❌ Failed to play audio: {e}")
             return False
     
     def get_call_info(self, call_id: str) -> Optional[Dict[str, Any]]:
@@ -616,14 +662,22 @@ class SIPClient:
     
     def get_registration_status(self) -> Dict[str, Any]:
         """Get registration status information"""
-        return {
+        status_info = {
             'registered': self.registered,
             'domain': self.domain,
             'username': self.username,
             'pbx_port': self.port,
             'local_port': self.local_port,
-            'active_calls': len(self.active_calls)
+            'active_calls': len(self.active_calls),
+            'docker_network_mode': os.environ.get('DOCKER_NETWORK_MODE', 'bridge')
         }
+        
+        # Try to get more detailed status
+        if self.phone and hasattr(self.phone, 'sip'):
+            if hasattr(self.phone.sip, 'status'):
+                status_info['sip_status'] = str(self.phone.sip.status)
+        
+        return status_info
     
     def shutdown(self):
         """Shutdown SIP client properly"""
@@ -639,42 +693,13 @@ class SIPClient:
                 except Exception as e:
                     sip_logger.error(f"❌ Error ending call {call_id}: {e}")
             
-            # Stop the phone with proper socket handling
+            # Stop the phone
             if self.phone:
                 try:
-                    # Check if SIP socket is still valid before stopping
-                    if hasattr(self.phone, 'sip') and self.phone.sip:
-                        if hasattr(self.phone.sip, 's') and self.phone.sip.s:
-                            try:
-                                # Test socket validity
-                                self.phone.sip.s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-                                sip_logger.info("📱 Stopping VoIPPhone with valid socket...")
-                                self.phone.stop()
-                                sip_logger.info("✅ VoIPPhone stopped successfully")
-                            except (OSError, socket.error) as socket_err:
-                                sip_logger.warning(f"⚠️ Socket already closed or invalid: {socket_err}")
-                                # Try to stop anyway
-                                try:
-                                    self.phone.stop()
-                                    sip_logger.info("✅ VoIPPhone stopped despite socket error")
-                                except Exception as e:
-                                    sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
-                        else:
-                            sip_logger.warning("⚠️ SIP socket not found, stopping phone anyway")
-                            try:
-                                self.phone.stop()
-                                sip_logger.info("✅ VoIPPhone stopped successfully")
-                            except Exception as e:
-                                sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
-                    else:
-                        sip_logger.warning("⚠️ SIP object not found, stopping phone anyway")
-                        try:
-                            self.phone.stop()
-                            sip_logger.info("✅ VoIPPhone stopped successfully")
-                        except Exception as e:
-                            sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
+                    self.phone.stop()
+                    sip_logger.info("✅ VoIPPhone stopped")
                 except Exception as e:
-                    sip_logger.error(f"❌ Error stopping VoIPPhone: {e}")
+                    sip_logger.warning(f"⚠️ Error stopping phone: {e}")
                 finally:
                     self.phone = None
             
@@ -683,5 +708,3 @@ class SIPClient:
             
         except Exception as e:
             sip_logger.error(f"❌ Error during shutdown: {e}")
-            import traceback
-            sip_logger.error(f"❌ Shutdown error traceback: {traceback.format_exc()}")

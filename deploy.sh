@@ -487,6 +487,7 @@ services:
   callbot:
     build: .
     container_name: callbot-app
+    network_mode: "host"  # This allows direct network access
     env_file:
       - .env
     environment:
@@ -509,10 +510,12 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+    ports:
+      - "5000:5000"  # Web interface
+      - "5070:5070/udp"  # SIP port
+      - "10000-20000:10000-20000/udp"  # RTP ports for audio
     networks:
       - callbot-network
-    expose:
-      - "5000"
 
   # Ollama AI service (optional - for local Ollama)
   ollama:
