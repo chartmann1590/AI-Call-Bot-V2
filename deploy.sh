@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# A-Call-Bot-V2 Deploy Script
-# This script pulls the latest code, sets up SSL certificates, and deploys the application
+# A-Call-Bot-V2 Complete Deployment Script with SIP Fix
+# This script ensures your bot is REACHABLE and can receive calls
 
 set -e  # Exit on any error
 
@@ -10,29 +10,38 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Configuration
-DOMAIN="localhost"  # Change this to your domain
+DOMAIN="localhost"  # Change this to your domain if needed
 SSL_DIR="./ssl"
 NGINX_CONF_DIR="./nginx"
 CERT_VALIDITY_DAYS=365
+LOG_FILE="deployment.log"
 
 # Function to print colored output
 print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1" | tee -a $LOG_FILE
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a $LOG_FILE
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a $LOG_FILE
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a $LOG_FILE
+}
+
+print_section() {
+    echo -e "\n${CYAN}========================================${NC}" | tee -a $LOG_FILE
+    echo -e "${CYAN}$1${NC}" | tee -a $LOG_FILE
+    echo -e "${CYAN}========================================${NC}\n" | tee -a $LOG_FILE
 }
 
 # Function to check if command exists
@@ -43,7 +52,6 @@ command_exists() {
 # Function to determine docker compose command
 get_docker_compose_cmd() {
     if command_exists "docker"; then
-        # Check if docker compose (V2) is available
         if docker compose version >/dev/null 2>&1; then
             echo "docker compose"
         elif command_exists "docker-compose"; then
@@ -58,500 +66,418 @@ get_docker_compose_cmd() {
     fi
 }
 
-# Check Docker daemon settings
-check_docker_settings() {
-    print_status "Checking Docker daemon settings..."
+# Get host IP address
+get_host_ip() {
+    # Try multiple methods to get the host IP
+    local host_ip=""
     
-    # Check if BuildKit is available
-    if docker info | grep -q "BuildKit"; then
-        print_success "BuildKit is available for optimized builds"
-    else
-        print_warning "BuildKit not detected - builds may use more disk space"
+    # Method 1: Get default route IP
+    host_ip=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[^ ]+' || true)
+    
+    if [ -z "$host_ip" ]; then
+        # Method 2: Get first non-loopback IP
+        host_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
     fi
     
-    # Check Docker daemon memory (if on macOS)
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        print_status "On macOS - consider increasing Docker Desktop memory to 8GB+"
-        print_status "Go to Docker Desktop > Settings > Resources > Advanced"
+    if [ -z "$host_ip" ]; then
+        # Method 3: Use hostname
+        host_ip=$(hostname -i 2>/dev/null | grep -v '127.0.0.1' | head -1 || true)
     fi
     
-    # Check available Docker disk space
-    local docker_space=$(docker system df | grep "Total Space" | awk '{print $3}')
-    if [ -n "$docker_space" ]; then
-        print_status "Docker disk usage: $docker_space"
+    if [ -z "$host_ip" ]; then
+        host_ip="127.0.0.1"
+        print_warning "Could not detect host IP, using localhost"
     fi
+    
+    echo "$host_ip"
 }
 
-# Configure Ollama deployment
-configure_ollama_deployment() {
-    print_status "Configuring Ollama deployment..."
+# Check system requirements
+check_system_requirements() {
+    print_section "CHECKING SYSTEM REQUIREMENTS"
     
-    echo
-    echo "Ollama Deployment Options:"
-    echo "1. Use remote Ollama (recommended for production)"
-    echo "2. Use local Ollama (requires more resources)"
-    echo "3. Skip Ollama configuration"
-    echo
-    
-    read -p "Choose an option (1-3): " ollama_choice
-    
-    case $ollama_choice in
-        1)
-            print_status "Configuring remote Ollama..."
-            
-            read -p "Enter your remote Ollama URL (e.g., https://your-ollama-server.com:11434): " ollama_url
-            
-            if [ -z "$ollama_url" ]; then
-                print_error "Ollama URL cannot be empty"
-                exit 1
-            fi
-            
-            read -p "Enter the model name (default: llama2): " ollama_model
-            ollama_model=${ollama_model:-llama2}
-            
-            # Create or update .env file with Ollama configuration
-            if [ ! -f ".env" ]; then
-                cp env.example .env
-            fi
-            
-            # Update .env file with Ollama URL and model
-            sed -i.bak "s|# OLLAMA_URL=https://your-ollama-server.com:11434|OLLAMA_URL=$ollama_url|" .env
-            sed -i.bak "s|# OLLAMA_MODEL=llama2|OLLAMA_MODEL=$ollama_model|" .env
-            
-            # Set environment variables for current session
-            export OLLAMA_URL="$ollama_url"
-            export OLLAMA_MODEL="$ollama_model"
-            
-            print_success "Remote Ollama configured:"
-            print_success "  URL: $ollama_url"
-            print_success "  Model: $ollama_model"
-            print_success "  Deployment: docker-compose up -d (without local Ollama)"
-            ;;
-            
-        2)
-            print_status "Configuring local Ollama..."
-            
-            read -p "Enter the model name (default: llama2): " ollama_model
-            ollama_model=${ollama_model:-llama2}
-            
-            # Create or update .env file with Ollama configuration
-            if [ ! -f ".env" ]; then
-                cp env.example .env
-            fi
-            
-            # Update .env file with local Ollama URL and model
-            sed -i.bak "s|# OLLAMA_URL=https://your-ollama-server.com:11434|OLLAMA_URL=http://ollama:11434|" .env
-            sed -i.bak "s|# OLLAMA_MODEL=llama2|OLLAMA_MODEL=$ollama_model|" .env
-            
-            # Set environment variables for current session
-            export OLLAMA_URL="http://ollama:11434"
-            export OLLAMA_MODEL="$ollama_model"
-            
-            print_success "Local Ollama configured:"
-            print_success "  Model: $ollama_model"
-            print_success "  Deployment: docker-compose --profile local-ollama up -d"
-            ;;
-            
-        3)
-            print_status "Skipping Ollama configuration"
-            print_warning "You'll need to configure Ollama manually later"
-            ;;
-            
-        *)
-            print_error "Invalid option"
-            exit 1
-            ;;
-    esac
-}
-
-# Check Python version compatibility
-check_python_compatibility() {
-    print_status "Checking Python version compatibility..."
-    
-    # Check if we're using Python 3.9 in Docker
-    if grep -q "FROM python:3.9" Dockerfile; then
-        print_warning "Detected Python 3.9 in Dockerfile"
-        print_warning "The TTS package requires Python 3.10+ for compatibility"
-        
-        echo
-        echo "Python Version Compatibility Options:"
-        echo "1. Upgrade to Python 3.10+ (recommended)"
-        echo "2. Use alternative TTS engines (Python 3.9 compatible)"
-        echo "3. Continue with current setup (may fail)"
-        echo
-        
-        read -p "Choose an option (1-3): " python_choice
-        
-        case $python_choice in
-            1)
-                print_status "Upgrading to Python 3.10..."
-                
-                # Update Dockerfile
-                sed -i.bak 's/FROM python:3.9/FROM python:3.10/g' Dockerfile
-                sed -i.bak 's/FROM python:3.9/FROM python:3.10/g' Dockerfile.optimized
-                
-                # Update Python path in Dockerfile.optimized
-                sed -i.bak 's/python3.9\/site-packages/python3.10\/site-packages/g' Dockerfile.optimized
-                
-                print_success "Dockerfiles updated to Python 3.10"
-                print_success "This allows full TTS functionality including Coqui TTS"
-                ;;
-                
-            2)
-                print_status "Using alternative TTS engines..."
-                
-                # Use the Python 3.9 compatible requirements
-                if [ -f "requirements-python39.txt" ]; then
-                    cp requirements-python39.txt requirements.txt
-                    print_success "Updated requirements.txt to use alternative TTS engines"
-                    print_warning "This excludes Coqui TTS but keeps pyttsx3 and espeak-ng"
-                else
-                    print_error "requirements-python39.txt not found"
-                    exit 1
-                fi
-                ;;
-                
-            3)
-                print_warning "Continuing with Python 3.9 - build may fail"
-                print_warning "If build fails, run: ./fix-python-version.sh"
-                ;;
-                
-            *)
-                print_error "Invalid option"
-                exit 1
-                ;;
-        esac
+    # Check OS
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        print_success "Operating System: Linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        print_warning "Operating System: macOS (some features may vary)"
     else
-        print_success "Python version compatibility check passed"
+        print_warning "Operating System: $OSTYPE (untested)"
+    fi
+    
+    # Check memory
+    local total_mem=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "0")
+    if [ "$total_mem" -lt 2048 ]; then
+        print_warning "Low memory detected: ${total_mem}MB (minimum 2GB recommended)"
+    else
+        print_success "Memory: ${total_mem}MB"
+    fi
+    
+    # Check disk space
+    local available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ "$available_space" -lt 5 ]; then
+        print_warning "Low disk space: ${available_space}GB available (minimum 5GB recommended)"
+    else
+        print_success "Disk space: ${available_space}GB available"
     fi
 }
 
 # Check prerequisites
 check_prerequisites() {
-    print_status "Checking prerequisites..."
+    print_section "CHECKING PREREQUISITES"
     
     local missing_deps=()
     
+    # Check Docker
     if ! command_exists docker; then
         missing_deps+=("docker")
+    else
+        local docker_version=$(docker --version | grep -oE '[0-9]+\.[0-9]+')
+        print_success "Docker installed: version $docker_version"
     fi
     
-    # Check for either docker-compose or docker compose
+    # Check Docker Compose
     DOCKER_COMPOSE_CMD=$(get_docker_compose_cmd)
-    print_status "Using Docker Compose command: $DOCKER_COMPOSE_CMD"
+    print_success "Docker Compose command: $DOCKER_COMPOSE_CMD"
     
+    # Check other tools
     if ! command_exists openssl; then
         missing_deps+=("openssl")
+    else
+        print_success "OpenSSL installed"
     fi
     
+    if ! command_exists git; then
+        missing_deps+=("git")
+    else
+        print_success "Git installed"
+    fi
+    
+    # Report missing dependencies
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_error "Missing required dependencies: ${missing_deps[*]}"
         print_error "Please install the missing dependencies and try again."
+        
+        # Provide installation instructions
+        echo
+        print_status "Installation instructions:"
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            print_status "  sudo apt-get update && sudo apt-get install -y ${missing_deps[*]}"
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            print_status "  brew install ${missing_deps[*]}"
+        fi
         exit 1
     fi
     
     print_success "All prerequisites are installed"
+}
+
+# Check Docker daemon
+check_docker_daemon() {
+    print_section "CHECKING DOCKER DAEMON"
+    
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker daemon is not running"
+        print_status "Starting Docker daemon..."
+        
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            sudo systemctl start docker || true
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            open -a Docker || true
+            sleep 5
+        fi
+        
+        if ! docker info >/dev/null 2>&1; then
+            print_error "Failed to start Docker daemon"
+            exit 1
+        fi
+    fi
+    
+    print_success "Docker daemon is running"
     
     # Check Docker settings
-    check_docker_settings
-    
-    # Check Python version compatibility
-    check_python_compatibility
-    
-    # Ensure fix script is executable
-    if [ -f "fix-python-version.sh" ]; then
-        chmod +x fix-python-version.sh
-        print_status "Fix script is ready: ./fix-python-version.sh"
+    if docker info | grep -q "BuildKit"; then
+        print_success "BuildKit is available for optimized builds"
+        export DOCKER_BUILDKIT=1
     fi
 }
 
-# Pull latest changes from git
-pull_latest_changes() {
-    print_status "Pulling latest changes from git..."
+# Setup environment configuration
+setup_environment() {
+    print_section "SETTING UP ENVIRONMENT"
     
-    if [ ! -d ".git" ]; then
-        print_error "Not a git repository. Please clone the repository first."
-        exit 1
-    fi
-    
-    # Stash any local changes to avoid conflicts
-    print_status "Stashing any local changes..."
-    git stash || true
-    
-    # Fetch all changes from remote
-    print_status "Fetching latest changes from remote..."
-    git fetch --all
-    
-    # Get the current branch name
-    CURRENT_BRANCH=$(git branch --show-current)
-    print_status "Current branch: $CURRENT_BRANCH"
-    
-    # Reset to match the remote branch exactly
-    print_status "Resetting to match remote branch..."
-    git reset --hard "origin/$CURRENT_BRANCH"
-    
-    # Clean any untracked files
-    print_status "Cleaning untracked files..."
-    git clean -fd
-    
-    print_success "Latest changes pulled successfully"
-}
+    # Create .env file if it doesn't exist
+    if [ ! -f ".env" ]; then
+        print_warning ".env file not found, creating from template..."
+        
+        if [ -f "env.example" ]; then
+            cp env.example .env
+        else
+            # Create a new .env file with defaults
+            cat > .env << 'EOF'
+# Flask Configuration
+FLASK_ENV=production
+SECRET_KEY=your-secret-key-change-in-production
+DATABASE_URL=sqlite:///callbot.db
 
-# Generate self-signed SSL certificate
-generate_ssl_certificate() {
-    print_status "Generating self-signed SSL certificate..."
-    
-    # Create SSL directory if it doesn't exist
-    mkdir -p "$SSL_DIR"
-    
-    # Generate private key
-    openssl genrsa -out "$SSL_DIR/private.key" 2048
-    
-    # Generate certificate signing request
-    openssl req -new -key "$SSL_DIR/private.key" -out "$SSL_DIR/cert.csr" -subj "/C=US/ST=State/L=City/O=Organization/CN=$DOMAIN"
-    
-    # Generate self-signed certificate
-    openssl x509 -req -in "$SSL_DIR/cert.csr" -signkey "$SSL_DIR/private.key" -out "$SSL_DIR/cert.crt" -days $CERT_VALIDITY_DAYS
-    
-    # Set proper permissions
-    chmod 600 "$SSL_DIR/private.key"
-    chmod 644 "$SSL_DIR/cert.crt"
-    
-    # Clean up CSR file
-    rm "$SSL_DIR/cert.csr"
-    
-    print_success "SSL certificate generated successfully"
-    print_warning "This is a self-signed certificate. Browsers will show a security warning."
-}
+# SIP Configuration - CHANGE THESE VALUES!
+SIP_DOMAIN=your-pbx-server.com
+SIP_USERNAME=9898
+SIP_PASSWORD=your-sip-password
+SIP_PORT=5060
 
-# Create nginx configuration
-create_nginx_config() {
-    print_status "Creating nginx configuration..."
-    
-    mkdir -p "$NGINX_CONF_DIR"
-    
-    cat > "$NGINX_CONF_DIR/nginx.conf" << EOF
-events {
-    worker_connections 1024;
-}
+# Network Configuration
+DOCKER_HOST_NETWORK=true
+DOCKER_NETWORK_MODE=host
 
-http {
-    upstream callbot_backend {
-        server callbot:5000;
-    }
-    
-    # Rate limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=10r/s;
-    
-    server {
-        listen 80;
-        server_name $DOMAIN;
-        
-        # Redirect HTTP to HTTPS - preserve original IP address
-        return 301 https://\$host\$request_uri;
-    }
-    
-    server {
-        listen 443 ssl http2;
-        server_name $DOMAIN;
-        
-        # SSL configuration
-        ssl_certificate /etc/nginx/ssl/cert.crt;
-        ssl_certificate_key /etc/nginx/ssl/private.key;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
-        ssl_prefer_server_ciphers off;
-        ssl_session_cache shared:SSL:10m;
-        ssl_session_timeout 10m;
-        
-        # Security headers
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        add_header X-Frame-Options DENY always;
-        add_header X-Content-Type-Options nosniff always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        
-        # Client max body size
-        client_max_body_size 10M;
-        
-        # Static files
-        location /static/ {
-            alias /app/static/;
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-        
-        # API endpoints with rate limiting
-        location /api/ {
-            limit_req zone=api burst=20 nodelay;
-            proxy_pass http://callbot_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_connect_timeout 30s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
-        
-        # WebSocket support for real-time features
-        location /ws {
-            proxy_pass http://callbot_backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-        }
-        
-        # Main application
-        location / {
-            proxy_pass http://callbot_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_connect_timeout 30s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
-    }
-    
-    # Catch-all server block for IP-based access (no SSL)
-    server {
-        listen 80;
-        server_name _;
-        
-        # Static files
-        location /static/ {
-            alias /app/static/;
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-        
-        # API endpoints with rate limiting
-        location /api/ {
-            limit_req zone=api burst=20 nodelay;
-            proxy_pass http://callbot_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_connect_timeout 30s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
-        
-        # WebSocket support for real-time features
-        location /ws {
-            proxy_pass http://callbot_backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-        }
-        
-        # Main application
-        location / {
-            proxy_pass http://callbot_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_connect_timeout 30s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
-    }
-}
+# Ollama Configuration
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama2
+
+# TTS Configuration
+TTS_ENGINE=espeak
+TTS_VOICE=en-us
+
+# Whisper Configuration
+WHISPER_MODEL_SIZE=base
+WHISPER_DEVICE=cpu
+
+# Audio Configuration
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHUNK_DURATION=5
+AUDIO_OUTPUT_DIR=audio_output
+
+# Web Server Configuration
+WEB_PORT=5000
+WEB_HOST=0.0.0.0
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=logs/app.log
 EOF
+        fi
+        
+        print_warning "Please edit .env file with your SIP settings!"
+        print_warning "The bot WILL NOT WORK without correct SIP credentials!"
+        
+        # Interactive configuration
+        echo
+        read -p "Do you want to configure SIP settings now? (y/n): " configure_now
+        if [[ "$configure_now" =~ ^[Yy]$ ]]; then
+            configure_sip_interactive
+        else
+            print_error "You must configure SIP settings in .env before the bot can work!"
+            print_status "Edit .env file and run this script again"
+            exit 1
+        fi
+    else
+        print_success ".env file exists"
+        
+        # Source environment variables
+        source .env
+        
+        # Validate critical settings
+        if [ "$SIP_DOMAIN" = "your-pbx-server.com" ] || [ -z "$SIP_DOMAIN" ]; then
+            print_error "SIP_DOMAIN is not configured!"
+            configure_sip_interactive
+        fi
+    fi
     
-    print_success "Nginx configuration created successfully"
+    # Get and display host IP
+    HOST_IP=$(get_host_ip)
+    print_success "Host IP detected: $HOST_IP"
+    
+    # Add host IP to environment
+    echo "HOST_IP=$HOST_IP" >> .env
+    
+    # Ensure Docker host network mode is set
+    if ! grep -q "DOCKER_HOST_NETWORK=true" .env; then
+        echo "DOCKER_HOST_NETWORK=true" >> .env
+        echo "DOCKER_NETWORK_MODE=host" >> .env
+    fi
+    
+    print_success "Environment configuration complete"
 }
 
-# Update docker-compose for production
-update_docker_compose() {
-    print_status "Updating docker-compose configuration for production..."
+# Interactive SIP configuration
+configure_sip_interactive() {
+    print_section "SIP CONFIGURATION"
     
-    # Create a production docker-compose file
-    cat > "docker-compose.prod.yml" << EOF
+    echo "Please enter your SIP/PBX settings:"
+    echo
+    
+    read -p "SIP Domain (PBX server address): " sip_domain
+    read -p "SIP Username (extension number, e.g., 9898): " sip_username
+    read -s -p "SIP Password: " sip_password
+    echo
+    read -p "SIP Port (default 5060): " sip_port
+    sip_port=${sip_port:-5060}
+    
+    # Update .env file
+    sed -i.bak "s/SIP_DOMAIN=.*/SIP_DOMAIN=$sip_domain/" .env
+    sed -i.bak "s/SIP_USERNAME=.*/SIP_USERNAME=$sip_username/" .env
+    sed -i.bak "s/SIP_PASSWORD=.*/SIP_PASSWORD=$sip_password/" .env
+    sed -i.bak "s/SIP_PORT=.*/SIP_PORT=$sip_port/" .env
+    
+    print_success "SIP configuration saved"
+    
+    # Reload environment
+    source .env
+}
+
+# Configure Ollama
+configure_ollama() {
+    print_section "OLLAMA CONFIGURATION"
+    
+    echo "Choose Ollama deployment option:"
+    echo "1. Use local Ollama (will be installed in Docker)"
+    echo "2. Use remote Ollama server"
+    echo "3. Skip Ollama (bot won't have AI responses)"
+    echo
+    
+    read -p "Enter choice (1-3): " ollama_choice
+    
+    case $ollama_choice in
+        1)
+            print_status "Configuring local Ollama..."
+            sed -i.bak "s|OLLAMA_URL=.*|OLLAMA_URL=http://localhost:11434|" .env
+            USE_LOCAL_OLLAMA=true
+            
+            # Pull Ollama model
+            print_status "Pulling Ollama model (this may take a while)..."
+            docker pull ollama/ollama:latest || true
+            ;;
+        2)
+            print_status "Configuring remote Ollama..."
+            read -p "Enter Ollama server URL: " ollama_url
+            sed -i.bak "s|OLLAMA_URL=.*|OLLAMA_URL=$ollama_url|" .env
+            USE_LOCAL_OLLAMA=false
+            ;;
+        3)
+            print_warning "Skipping Ollama - bot will have limited functionality"
+            USE_LOCAL_OLLAMA=false
+            ;;
+        *)
+            print_warning "Invalid choice, using default (local Ollama)"
+            USE_LOCAL_OLLAMA=true
+            ;;
+    esac
+}
+
+# Clean Docker system
+clean_docker_system() {
+    print_section "CLEANING DOCKER SYSTEM"
+    
+    print_status "Stopping existing containers..."
+    $DOCKER_COMPOSE_CMD down 2>/dev/null || true
+    docker stop callbot-app 2>/dev/null || true
+    docker stop callbot-ollama 2>/dev/null || true
+    docker stop callbot-redis 2>/dev/null || true
+    docker stop callbot-nginx 2>/dev/null || true
+    
+    print_status "Removing old containers..."
+    docker rm callbot-app 2>/dev/null || true
+    docker rm callbot-ollama 2>/dev/null || true
+    docker rm callbot-redis 2>/dev/null || true
+    docker rm callbot-nginx 2>/dev/null || true
+    
+    print_status "Cleaning Docker system..."
+    docker system prune -f --volumes 2>/dev/null || true
+    
+    print_success "Docker system cleaned"
+}
+
+# Setup firewall rules
+setup_firewall() {
+    print_section "CONFIGURING FIREWALL"
+    
+    if command_exists ufw; then
+        print_status "Configuring UFW firewall rules..."
+        
+        # SIP port
+        sudo ufw allow 5070/udp comment 'CallBot SIP' 2>/dev/null || true
+        
+        # RTP ports for audio
+        sudo ufw allow 10000:20000/udp comment 'CallBot RTP' 2>/dev/null || true
+        
+        # Web interface
+        sudo ufw allow 5000/tcp comment 'CallBot Web' 2>/dev/null || true
+        
+        # HTTP/HTTPS if using nginx
+        sudo ufw allow 80/tcp comment 'HTTP' 2>/dev/null || true
+        sudo ufw allow 443/tcp comment 'HTTPS' 2>/dev/null || true
+        
+        print_success "Firewall rules configured"
+    elif command_exists iptables; then
+        print_status "Configuring iptables rules..."
+        
+        # Add iptables rules
+        sudo iptables -A INPUT -p udp --dport 5070 -j ACCEPT 2>/dev/null || true
+        sudo iptables -A INPUT -p udp --dport 10000:20000 -j ACCEPT 2>/dev/null || true
+        sudo iptables -A INPUT -p tcp --dport 5000 -j ACCEPT 2>/dev/null || true
+        
+        print_success "Firewall rules configured"
+    else
+        print_warning "No firewall detected, skipping firewall configuration"
+        print_warning "Please manually open ports: 5070/udp, 10000-20000/udp, 5000/tcp"
+    fi
+}
+
+# Create Docker Compose file
+create_docker_compose() {
+    print_section "CREATING DOCKER COMPOSE CONFIGURATION"
+    
+    # Create production docker-compose file with host networking
+    cat > docker-compose.yml << 'EOF'
 version: '3.8'
 
 services:
-  # CallBot main application
+  # CallBot main application with HOST NETWORK for SIP
   callbot:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: callbot-app
-    network_mode: "host"  # This allows direct network access
+    network_mode: "host"  # CRITICAL: Required for SIP to work properly
     env_file:
       - .env
     environment:
       - FLASK_ENV=production
-      - SECRET_KEY=\${SECRET_KEY:-your-secret-key-change-in-production}
-      - DATABASE_URL=\${DATABASE_URL:-sqlite:///callbot.db}
-      - SIP_DOMAIN=\${SIP_DOMAIN:-your-sip-server.com}
-      - SIP_USERNAME=\${SIP_USERNAME:-1001}
-      - SIP_PASSWORD=\${SIP_PASSWORD:-password}
-      # Ollama configuration - supports both remote and local
-      - OLLAMA_URL=\${OLLAMA_URL:-http://ollama:11434}
-      - OLLAMA_MODEL=\${OLLAMA_MODEL:-llama2}
-      - TTS_ENGINE=\${TTS_ENGINE:-coqui}
-      - WHISPER_MODEL_SIZE=\${WHISPER_MODEL_SIZE:-base}
-      - WHISPER_DEVICE=\${WHISPER_DEVICE:-cpu}
+      - DOCKER_HOST_NETWORK=true
+      - DOCKER_NETWORK_MODE=host
     volumes:
       - ./audio_output:/app/audio_output
       - ./logs:/app/logs
+      - ./src:/app/src:ro  # Mount source code
       - callbot_data:/app/data
-    depends_on:
-      - redis
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Ollama AI service (optional - for local Ollama)
+  # Optional: Local Ollama AI service
   ollama:
     image: ollama/ollama:latest
     container_name: callbot-ollama
+    network_mode: "host"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
-    networks:
-      - callbot-network
-    expose:
-      - "11434"
     profiles:
       - local-ollama
+    command: serve
 
-  # Redis for caching and background tasks
+  # Redis for caching
   redis:
     image: redis:7-alpine
     container_name: callbot-redis
+    network_mode: "host"
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    networks:
-      - callbot-network
-    expose:
-      - "6379"
-
-  # Nginx reverse proxy with SSL
-  nginx:
-    image: nginx:alpine
-    container_name: callbot-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - callbot
-    restart: unless-stopped
-    networks:
-      - callbot-network
+    command: redis-server --port 6379 --bind 127.0.0.1
 
 volumes:
   callbot_data:
@@ -560,428 +486,176 @@ volumes:
     driver: local
   redis_data:
     driver: local
-
-networks:
-  callbot-network:
-    driver: bridge
 EOF
     
-    print_success "Production docker-compose configuration created"
+    print_success "Docker Compose configuration created"
 }
 
-# Clean Docker system to free up space
-clean_docker_system() {
-    print_status "Cleaning Docker system to free up disk space..."
+# Build Docker image
+build_docker_image() {
+    print_section "BUILDING DOCKER IMAGE"
     
-    # Clean up unused containers, networks, and images
-    docker system prune -f || true
-    
-    # Clean up build cache
-    docker builder prune -f || true
-    
-    # Clean up unused volumes (be careful with this in production)
-    docker volume prune -f || true
-    
-    print_success "Docker system cleaned"
-}
-
-# Check available disk space
-check_disk_space() {
-    print_status "Checking available disk space..."
-    
-    # Get available disk space in GB
-    local available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-    
-    if [ "$available_space" -lt 5 ]; then
-        print_warning "Low disk space detected: ${available_space}GB available"
-        print_warning "Consider freeing up disk space before continuing"
-        read -p "Continue anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_error "Deployment cancelled by user"
-            exit 1
-        fi
-    else
-        print_success "Sufficient disk space available: ${available_space}GB"
-    fi
-}
-
-# Show troubleshooting information
-show_troubleshooting_info() {
-    echo
-    echo "=========================================="
-    echo "         TROUBLESHOOTING GUIDE"
-    echo "=========================================="
-    echo
-    echo "DEPLOYMENT OPTIONS:"
-    echo "The script now offers three deployment types:"
-    echo "1. Full Rebuild - Rebuilds everything from scratch (slowest)"
-    echo "2. Fast Update - Uses existing images, only updates code (fastest)"
-    echo "3. Smart Deploy - Automatically chooses based on requirements.txt changes"
-    echo
-    echo "PYTHON VERSION COMPATIBILITY ISSUES:"
-    echo "If you see 'TypeError: unsupported operand type(s) for |':"
-    echo "1. Run the fix script: ./fix-python-version.sh"
-    echo "2. Or manually update Dockerfiles to Python 3.10"
-    echo "3. Or use alternative TTS engines with requirements-python39.txt"
-    echo
-    echo "DOCKER BUILD FAILURES:"
-    echo "If Docker build fails with 'No space left on device':"
-    echo
-    echo "1. Clean Docker system:"
-    echo "   docker system prune -f"
-    echo "   docker builder prune -f"
-    echo
-    echo "2. Check disk space:"
-    echo "   df -h /"
-    echo
-    echo "3. Free up disk space:"
-    echo "   - Remove old Docker images: docker image prune -a"
-    echo "   - Remove unused volumes: docker volume prune"
-    echo "   - Clean system cache: sudo apt-get clean (Ubuntu/Debian)"
-    echo
-    echo "4. Increase Docker Desktop resources (macOS):"
-    echo "   - Go to Docker Desktop > Settings > Resources"
-    echo "   - Increase memory limit to 8GB+"
-    echo "   - Increase disk image size"
-    echo
-    echo "5. Use optimized Dockerfile:"
-    echo "   - The Dockerfile has been optimized with --no-install-recommends"
-    echo "   - Consider using multi-stage builds for complex applications"
-    echo
-    echo "6. Alternative build commands:"
-    echo "   - Build with no cache: docker build --no-cache ."
-    echo "   - Build with BuildKit: DOCKER_BUILDKIT=1 docker build ."
-    echo
-    echo "FAST UPDATE ISSUES:"
-    echo "If fast update doesn't work as expected:"
-    echo "1. Try a full rebuild to ensure all dependencies are up to date"
-    echo "2. Check if requirements.txt has changed (requires full rebuild)"
-    echo "3. Clear the .requirements_hash file to force a full rebuild"
-    echo
-    echo "TTS ENGINE ISSUES:"
-    echo "If TTS engines fail to initialize:"
-    echo "1. Check Python version compatibility"
-    echo "2. Ensure required system dependencies are installed"
-    echo "3. Try alternative TTS engines (pyttsx3, espeak-ng)"
-    echo
-}
-
-# Build Docker images with retry logic
-build_with_retry() {
-    local max_attempts=3
-    local attempt=1
-    
-    while [ $attempt -le $max_attempts ]; do
-        print_status "Build attempt $attempt of $max_attempts..."
-        
-        if docker info | grep -q "BuildKit"; then
-            print_status "Using BuildKit for optimized builds..."
-            export DOCKER_BUILDKIT=1
-            if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
-                    print_success "Build completed successfully on attempt $attempt"
-                    return 0
-                fi
-            else
-                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache --build-arg BUILDKIT_INLINE_CACHE=1; then
-                    print_success "Build completed successfully on attempt $attempt"
-                    return 0
-                fi
-            fi
-        else
-            print_status "Using standard Docker build..."
-            if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama build --no-cache; then
-                    print_success "Build completed successfully on attempt $attempt"
-                    return 0
-                fi
-            else
-                if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml build --no-cache; then
-                    print_success "Build completed successfully on attempt $attempt"
-                    return 0
-                fi
-            fi
-        fi
-        
-        print_warning "Build attempt $attempt failed"
-        
-        # Check for Python version related errors
-        if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
-                print_error "Python version compatibility error detected!"
-                print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
-                echo
-                echo "Quick fix options:"
-                echo "1. Run: ./fix-python-version.sh"
-                echo "2. Or manually:"
-                echo "   - Option A: Update Dockerfiles to Python 3.10"
-                echo "   - Option B: Use requirements-python39.txt"
-                echo
-                return 1
-            fi
-        else
-            if $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs callbot 2>/dev/null | grep -q "TypeError: unsupported operand type(s) for |"; then
-                print_error "Python version compatibility error detected!"
-                print_error "The TTS package requires Python 3.10+ but you're using Python 3.9"
-                echo
-                echo "Quick fix options:"
-                echo "1. Run: ./fix-python-version.sh"
-                echo "2. Or manually:"
-                echo "   - Option A: Update Dockerfiles to Python 3.10"
-                echo "   - Option B: Use requirements-python39.txt"
-                echo
-                return 1
-            fi
-        fi
-        
-        if [ $attempt -lt $max_attempts ]; then
-            print_status "Cleaning Docker system and retrying..."
-            clean_docker_system
-            sleep 10
-        fi
-        
-        attempt=$((attempt + 1))
-    done
-    
-    print_error "All build attempts failed"
-    return 1
-}
-
-
-
-# Display deployment information
-show_deployment_info() {
-    echo
-    echo "=========================================="
-    echo "           DEPLOYMENT COMPLETE"
-    echo "=========================================="
-    echo
-    echo "Application URLs:"
-    echo "  HTTP:  http://$DOMAIN (redirects to HTTPS)"
-    echo "  HTTPS: https://$DOMAIN"
-    echo
-    echo "Services:"
-    echo "  - CallBot App: http://localhost:5000"
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        echo "  - Local Ollama AI: http://localhost:11434"
-    else
-        echo "  - Remote Ollama AI: $OLLAMA_URL"
-    fi
-    echo "  - Redis: localhost:6379"
-    echo
-    echo "SSL Certificate:"
-    echo "  - Certificate: $SSL_DIR/cert.crt"
-    echo "  - Private Key: $SSL_DIR/private.key"
-    echo "  - Valid for: $CERT_VALIDITY_DAYS days"
-    echo
-    echo "Useful commands:"
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama logs -f"
-        echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down"
-        echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama restart"
-    else
-        echo "  - View logs: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml logs -f"
-        echo "  - Stop services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down"
-        echo "  - Restart services: $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml restart"
-    fi
-    echo
-    print_warning "Note: This uses a self-signed certificate. Browsers will show a security warning."
-    print_warning "For production, replace with a proper SSL certificate from a trusted CA."
-    echo
-    echo "Python Version Compatibility:"
-    if grep -q "FROM python:3.10" Dockerfile; then
-        print_success "Using Python 3.10 - Full TTS functionality available"
-    else
-        print_warning "Using Python 3.9 - Limited TTS functionality"
-        print_warning "Run ./fix-python-version.sh to upgrade to Python 3.10"
-    fi
-    echo
-}
-
-# Check if requirements.txt has changed
-check_requirements_changed() {
-    print_status "Checking if requirements.txt has changed..."
-    
-    if [ ! -f ".requirements_hash" ]; then
-        print_status "No previous requirements hash found - will do full rebuild"
-        return 0  # Changed
-    fi
-    
-    local current_hash=$(sha256sum requirements.txt | cut -d' ' -f1)
-    local stored_hash=$(cat .requirements_hash 2>/dev/null || echo "")
-    
-    if [ "$current_hash" != "$stored_hash" ]; then
-        print_warning "requirements.txt has changed - full rebuild required"
-        return 0  # Changed
-    else
-        print_success "requirements.txt unchanged - can use fast update"
-        return 1  # Not changed
-    fi
-}
-
-# Save requirements hash
-save_requirements_hash() {
-    sha256sum requirements.txt > .requirements_hash
-    print_status "Saved requirements hash for future comparisons"
-}
-
-# Fast update deployment
-fast_update() {
-    print_status "Performing fast update deployment..."
-    
-    # Stop existing containers
-    print_status "Stopping existing containers..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down || true
-    else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
-    fi
-    
-    # Pull latest changes
-    pull_latest_changes
-    
-    # Start services with existing images (no rebuild)
-    print_status "Starting services with existing images..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama up -d
-    else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
-    fi
-    
-    # Wait for services to be ready
-    print_status "Waiting for services to be ready..."
-    sleep 15
-    
-    # Check if services are running
-    print_status "Checking service status..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama ps
-    else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
-    fi
-    
-    print_success "Fast update completed successfully!"
-}
-
-# Full rebuild deployment
-full_rebuild() {
-    print_status "Performing full rebuild deployment..."
-    
-    # Check disk space first
-    check_disk_space
-    
-    # Clean Docker system to free up space
-    clean_docker_system
-    
-    # Stop existing containers
-    print_status "Stopping existing containers..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama down || true
-    else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml down || true
-    fi
-    
-    # Build and start the application with retry logic
-    print_status "Building Docker images with optimized settings..."
-    
-    if ! build_with_retry; then
-        print_error "Failed to build Docker images after multiple attempts"
-        print_error "Please check disk space and Docker configuration"
+    # Check if Dockerfile exists
+    if [ ! -f "Dockerfile" ]; then
+        print_error "Dockerfile not found!"
         exit 1
     fi
     
-    print_status "Starting services..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama up -d
-    else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml up -d
+    # Ensure Python 3.10 is used (required for TTS)
+    if grep -q "FROM python:3.9" Dockerfile; then
+        print_warning "Updating Dockerfile to use Python 3.10..."
+        sed -i.bak 's/FROM python:3.9/FROM python:3.10/g' Dockerfile
     fi
     
-    # Wait for services to be ready
-    print_status "Waiting for services to be ready..."
-    sleep 30
+    print_status "Building Docker image (this may take several minutes)..."
+    
+    # Build with BuildKit if available
+    if [ -n "${DOCKER_BUILDKIT}" ]; then
+        $DOCKER_COMPOSE_CMD build --no-cache --progress=plain
+    else
+        $DOCKER_COMPOSE_CMD build --no-cache
+    fi
+    
+    if [ $? -eq 0 ]; then
+        print_success "Docker image built successfully"
+    else
+        print_error "Failed to build Docker image"
+        print_status "Trying alternative build method..."
+        docker build -t callbot-app . || exit 1
+    fi
+}
+
+# Start services
+start_services() {
+    print_section "STARTING SERVICES"
+    
+    # Source environment to check Ollama setting
+    source .env
+    
+    # Start services based on Ollama configuration
+    if [ "$USE_LOCAL_OLLAMA" = true ]; then
+        print_status "Starting CallBot with local Ollama..."
+        $DOCKER_COMPOSE_CMD --profile local-ollama up -d
+    else
+        print_status "Starting CallBot without local Ollama..."
+        $DOCKER_COMPOSE_CMD up -d
+    fi
+    
+    print_status "Waiting for services to start..."
+    sleep 10
     
     # Check if services are running
     print_status "Checking service status..."
-    if [ "$OLLAMA_URL" = "http://ollama:11434" ]; then
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml --profile local-ollama ps
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    
+    # Check if CallBot container is running
+    if docker ps | grep -q "callbot-app"; then
+        print_success "CallBot is running"
     else
-        $DOCKER_COMPOSE_CMD -f docker-compose.prod.yml ps
+        print_error "CallBot failed to start"
+        print_status "Checking logs..."
+        docker logs callbot-app --tail 50
+        exit 1
     fi
+}
+
+# Verify SIP registration
+verify_sip_registration() {
+    print_section "VERIFYING SIP REGISTRATION"
     
-    # Save requirements hash for future comparisons
-    save_requirements_hash
+    print_status "Checking SIP registration status..."
+    sleep 5
     
-    print_success "Full rebuild completed successfully!"
+    # Check logs for registration success
+    if docker logs callbot-app 2>&1 | grep -q "REGISTRATION SUCCESSFUL"; then
+        print_success "SIP registration successful!"
+        
+        # Show registration details
+        docker logs callbot-app 2>&1 | grep -E "(Contact URI|Extension|REACHABLE)" | tail -5
+        
+        echo
+        print_success "Your bot should now show as REACHABLE in your PBX!"
+        print_success "SIP Contact: sip:${SIP_USERNAME}@${HOST_IP}:5070"
+    else
+        print_warning "SIP registration may still be in progress"
+        print_status "Check the logs: docker logs -f callbot-app"
+    fi
+}
+
+# Show deployment summary
+show_deployment_summary() {
+    print_section "DEPLOYMENT COMPLETE!"
+    
+    # Source environment for variables
+    source .env
+    
+    echo -e "${GREEN}CallBot has been successfully deployed!${NC}"
+    echo
+    echo "Access Points:"
+    echo "=============="
+    echo -e "${CYAN}Web Interface:${NC} http://${HOST_IP}:5000"
+    echo -e "${CYAN}SIP Extension:${NC} ${SIP_USERNAME}"
+    echo -e "${CYAN}SIP Contact:${NC} sip:${SIP_USERNAME}@${HOST_IP}:5070"
+    echo
+    echo "Quick Commands:"
+    echo "=============="
+    echo -e "${YELLOW}View logs:${NC} docker logs -f callbot-app"
+    echo -e "${YELLOW}Stop services:${NC} docker-compose down"
+    echo -e "${YELLOW}Restart services:${NC} docker-compose restart"
+    echo -e "${YELLOW}Check SIP status:${NC} docker logs callbot-app | grep -E '(REGISTER|REACHABLE)'"
+    echo
+    echo "Testing:"
+    echo "========"
+    echo "1. Check your PBX - Extension ${SIP_USERNAME} should show as 'OK' or 'Reachable'"
+    echo "2. Call extension ${SIP_USERNAME} from another phone"
+    echo "3. The bot should answer immediately (no voicemail)"
+    echo "4. Check logs to see call handling: docker logs -f callbot-app"
+    echo
+    echo "Troubleshooting:"
+    echo "==============="
+    echo "If extension shows as 'Unreachable':"
+    echo "  1. Check firewall: ports 5070/udp and 10000-20000/udp must be open"
+    echo "  2. Verify PBX can reach ${HOST_IP}"
+    echo "  3. Check PBX NAT settings for extension ${SIP_USERNAME}"
+    echo "  4. Review logs: docker logs callbot-app | grep ERROR"
+    echo
+    print_success "Deployment completed successfully!"
 }
 
 # Main deployment function
 main() {
-    echo "=========================================="
-    echo "    A-Call-Bot-V2 Deployment Script"
-    echo "=========================================="
-    echo
+    # Clear screen and show header
+    clear
+    echo -e "${MAGENTA}"
+    echo "╔══════════════════════════════════════════════════════════╗"
+    echo "║                                                          ║"
+    echo "║            A-Call-Bot-V2 Deployment Script              ║"
+    echo "║                                                          ║"
+    echo "║         Automated SIP Bot with AI Integration           ║"
+    echo "║                                                          ║"
+    echo "╚══════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
     
-    # Check prerequisites
+    # Initialize log file
+    echo "Deployment started at $(date)" > $LOG_FILE
+    
+    # Run deployment steps
+    check_system_requirements
     check_prerequisites
+    check_docker_daemon
+    setup_environment
+    configure_ollama
+    setup_firewall
+    clean_docker_system
+    create_docker_compose
+    build_docker_image
+    start_services
+    verify_sip_registration
+    show_deployment_summary
     
-    # Check deployment type
-    echo "Deployment Options:"
-    echo "1. Full Rebuild (no cache, rebuilds everything)"
-    echo "2. Fast Update (uses existing images, only updates code)"
-    echo "3. Smart Deploy (automatically chooses based on changes)"
-    echo
-    
-    read -p "Choose deployment type (1-3): " deploy_choice
-    
-    case $deploy_choice in
-        1)
-            print_status "Selected: Full Rebuild"
-            DEPLOY_TYPE="full"
-            ;;
-        2)
-            print_status "Selected: Fast Update"
-            DEPLOY_TYPE="fast"
-            ;;
-        3)
-            print_status "Selected: Smart Deploy"
-            if check_requirements_changed; then
-                print_status "Requirements changed - will do full rebuild"
-                DEPLOY_TYPE="full"
-            else
-                print_status "No requirements changes - will do fast update"
-                DEPLOY_TYPE="fast"
-            fi
-            ;;
-        *)
-            print_error "Invalid option"
-            exit 1
-            ;;
-    esac
-    
-    # Configure Ollama deployment
-    configure_ollama_deployment
-    
-    # Generate SSL certificate
-    generate_ssl_certificate
-    
-    # Create nginx configuration
-    create_nginx_config
-    
-    # Update docker-compose for production
-    update_docker_compose
-    
-    # Deploy based on type
-    if [ "$DEPLOY_TYPE" = "fast" ]; then
-        fast_update
-    else
-        full_rebuild
-    fi
-    
-    # Show deployment information
-    show_deployment_info
+    # Save deployment info
+    echo "Deployment completed at $(date)" >> $LOG_FILE
 }
 
 # Run the main function
-main "$@" 
+main "$@"
