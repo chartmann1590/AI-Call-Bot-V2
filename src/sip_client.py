@@ -468,22 +468,38 @@ class SIPClient:
             sip_logger.info("📱 Waiting for registration to complete...")
             time.sleep(2)
             
-            # Check if phone is still running
-            if hasattr(self.phone, 'sip') and self.phone.sip:
-                sip_logger.info("✅ SIP client appears to be running")
-                self.registered = True
-                self.running = True
-                
-                # Start keep-alive thread for maintaining registration
-                self._start_keep_alive()
-                
-                sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
-                sip_logger.info(f"📱 Extension: {self.username}")
-                sip_logger.info(f"📱 Ready to receive calls!")
-                
-                return True
-            else:
-                sip_logger.error("❌ SIP client failed to start properly")
+            # Check if phone is still running and handle socket errors
+            try:
+                if hasattr(self.phone, 'sip') and self.phone.sip:
+                    # Check if SIP socket is still valid
+                    if hasattr(self.phone.sip, 's') and self.phone.sip.s:
+                        try:
+                            # Test if socket is still valid
+                            self.phone.sip.s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                            sip_logger.info("✅ SIP client appears to be running with valid socket")
+                            self.registered = True
+                            self.running = True
+                            
+                            # Start keep-alive thread for maintaining registration
+                            self._start_keep_alive()
+                            
+                            sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
+                            sip_logger.info(f"📱 Extension: {self.username}")
+                            sip_logger.info(f"📱 Ready to receive calls!")
+                            
+                            return True
+                        except (OSError, socket.error) as socket_err:
+                            sip_logger.error(f"❌ SIP socket is invalid: {socket_err}")
+                            return False
+                    else:
+                        sip_logger.error("❌ SIP socket not found")
+                        return False
+                else:
+                    sip_logger.error("❌ SIP client failed to start properly")
+                    return False
+                    
+            except Exception as e:
+                sip_logger.error(f"❌ Error checking SIP client status: {e}")
                 return False
             
         except Exception as e:
@@ -620,19 +636,52 @@ class SIPClient:
             for call_id in list(self.active_calls.keys()):
                 try:
                     self._on_call_end(call_id)
-                except:
-                    pass
+                except Exception as e:
+                    sip_logger.error(f"❌ Error ending call {call_id}: {e}")
             
-            # Stop the phone
+            # Stop the phone with proper socket handling
             if self.phone:
                 try:
-                    self.phone.stop()
-                except:
-                    pass
-                self.phone = None
+                    # Check if SIP socket is still valid before stopping
+                    if hasattr(self.phone, 'sip') and self.phone.sip:
+                        if hasattr(self.phone.sip, 's') and self.phone.sip.s:
+                            try:
+                                # Test socket validity
+                                self.phone.sip.s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                                sip_logger.info("📱 Stopping VoIPPhone with valid socket...")
+                                self.phone.stop()
+                                sip_logger.info("✅ VoIPPhone stopped successfully")
+                            except (OSError, socket.error) as socket_err:
+                                sip_logger.warning(f"⚠️ Socket already closed or invalid: {socket_err}")
+                                # Try to stop anyway
+                                try:
+                                    self.phone.stop()
+                                    sip_logger.info("✅ VoIPPhone stopped despite socket error")
+                                except Exception as e:
+                                    sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
+                        else:
+                            sip_logger.warning("⚠️ SIP socket not found, stopping phone anyway")
+                            try:
+                                self.phone.stop()
+                                sip_logger.info("✅ VoIPPhone stopped successfully")
+                            except Exception as e:
+                                sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
+                    else:
+                        sip_logger.warning("⚠️ SIP object not found, stopping phone anyway")
+                        try:
+                            self.phone.stop()
+                            sip_logger.info("✅ VoIPPhone stopped successfully")
+                        except Exception as e:
+                            sip_logger.warning(f"⚠️ Could not stop VoIPPhone: {e}")
+                except Exception as e:
+                    sip_logger.error(f"❌ Error stopping VoIPPhone: {e}")
+                finally:
+                    self.phone = None
             
             self.registered = False
             sip_logger.info("✅ SIP client shutdown complete")
             
         except Exception as e:
             sip_logger.error(f"❌ Error during shutdown: {e}")
+            import traceback
+            sip_logger.error(f"❌ Shutdown error traceback: {traceback.format_exc()}")
