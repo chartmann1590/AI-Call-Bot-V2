@@ -137,11 +137,11 @@ class CallHandler:
     def start_call(self):
         """Start the call session"""
         try:
-            # Answer the call using pyVoIP
-            self.pyvoip_call.answer()
+            # THIS IS THE KEY FIX: Don't answer here, it's already answered
+            # The call is answered by returning from the callback
             self.recorder.start_recording()
             self.status = 'in_progress'
-            sip_logger.info(f"💬 Call {self.call_id} started and answered")
+            sip_logger.info(f"💬 Call {self.call_id} started (already answered by callback)")
         except Exception as e:
             sip_logger.error(f"❌ Error starting call {self.call_id}: {e}")
     
@@ -322,12 +322,13 @@ class SIPClient:
                     raise ValueError(f"Invalid SIP parameters - server: '{server}', username: '{username}', password: {'*' * len(password) if password else 'None'}")
                 
                 # Initialize VoIPPhone with proper parameters for VitalPBX
+                # CRITICAL: Pass the callback directly here
                 self.phone = VoIPPhone(
                     server=server,
                     port=port,
                     username=username,
                     password=password,
-                    callCallback=self._on_incoming_call,
+                    callCallback=self._handle_incoming_call_wrapper,  # Use wrapper method
                     myIP=local_ip,  # Use detected local IP instead of None
                     sipPort=sip_port,
                     rtpPortLow=10000,
@@ -354,6 +355,88 @@ class SIPClient:
                 if attempt == max_attempts - 1:
                     raise
                 current_local_port += 1
+    
+    def _handle_incoming_call_wrapper(self, call: VoIPCall):
+        """
+        Wrapper method for handling incoming calls from pyVoIP.
+        THIS IS THE CRITICAL FIX: We need to answer the call by calling call.answer()
+        and then handle it in a separate thread.
+        """
+        try:
+            sip_logger.info("=== INCOMING CALL WRAPPER TRIGGERED ===")
+            
+            # Generate a unique call ID
+            call_id = f"call_{int(time.time())}_{call.request.headers['Call-ID'][0][:8]}"
+            
+            # Extract caller ID from SIP headers
+            from_header = call.request.headers.get('From', [''])[0]
+            caller_id = from_header.split('<')[0].strip() if '<' in from_header else from_header
+            
+            sip_logger.info(f"📞 Incoming call {call_id} from {caller_id}")
+            sip_logger.info(f"📞 Call state: {call.state}")
+            
+            # CRITICAL: Answer the call immediately
+            sip_logger.info(f"📞 Answering call {call_id}...")
+            call.answer()
+            sip_logger.info(f"✅ Call {call_id} answered successfully")
+            
+            # Now handle the call in a separate thread
+            threading.Thread(
+                target=self._handle_answered_call,
+                args=(call, call_id, caller_id),
+                daemon=True
+            ).start()
+            
+            sip_logger.info(f"✅ Call handler thread started for {call_id}")
+            
+        except Exception as e:
+            sip_logger.error(f"❌ Error in incoming call wrapper: {e}")
+            import traceback
+            sip_logger.error(f"❌ Traceback: {traceback.format_exc()}")
+    
+    def _handle_answered_call(self, call: VoIPCall, call_id: str, caller_id: str):
+        """Handle the call after it has been answered"""
+        try:
+            sip_logger.info(f"📞 Handling answered call {call_id}")
+            
+            # Create call handler with the actual pyVoIP call object
+            call_handler = CallHandler(
+                call_id=call_id,
+                caller_id=caller_id,
+                pyvoip_call=call,  # Pass the actual call object
+                on_transcript=lambda transcript: self._on_transcript(call_id, transcript),
+                on_call_end=lambda: self._on_call_end(call_id)
+            )
+            
+            # Store call handler
+            self.active_calls[call_id] = call_handler
+            
+            # Start call handling (recording, etc.)
+            call_handler.start_call()
+            
+            # Notify application
+            if self.on_incoming_call:
+                self.on_incoming_call(call_id, caller_id)
+            
+            # Handle audio in this thread
+            sip_logger.info(f"📞 Starting audio handling for call {call_id}")
+            try:
+                while call.state == CallState.ANSWERED:
+                    # Read audio from the call
+                    audio = call.read_audio()
+                    if audio:
+                        call_handler.add_audio_chunk(audio)
+                    time.sleep(0.02)  # 20ms chunks
+            except Exception as e:
+                sip_logger.error(f"❌ Audio handler error for call {call_id}: {e}")
+            finally:
+                # Call ended
+                self._on_call_end(call_id)
+            
+        except Exception as e:
+            sip_logger.error(f"❌ Error handling answered call {call_id}: {e}")
+            import traceback
+            sip_logger.error(f"❌ Traceback: {traceback.format_exc()}")
     
     def register(self) -> bool:
         """Register with VitalPBX server and maintain registration"""
@@ -396,6 +479,7 @@ class SIPClient:
                 
                 sip_logger.info(f"✅ Registered with VitalPBX at {self.domain}:{self.port}")
                 sip_logger.info(f"📱 Extension: {self.username}")
+                sip_logger.info(f"📱 Ready to receive calls!")
                 
                 return True
             else:
@@ -437,65 +521,6 @@ class SIPClient:
         self.on_call_transcript = on_call_transcript
         self.on_call_end = on_call_end
         sip_logger.info("✅ SIP callbacks set successfully")
-    
-    def _on_incoming_call(self, call: VoIPCall):
-        """Handle incoming call from pyVoIP"""
-        try:
-            # Generate a unique call ID
-            call_id = f"call_{int(time.time())}_{call.request.headers['Call-ID'][0][:8]}"
-            
-            # Extract caller ID from SIP headers
-            from_header = call.request.headers.get('From', [''])[0]
-            caller_id = from_header.split('<')[0].strip() if '<' in from_header else from_header
-            
-            sip_logger.info(f"📞 Incoming call {call_id} from {caller_id}")
-            
-            # Create call handler with the actual pyVoIP call object
-            call_handler = CallHandler(
-                call_id=call_id,
-                caller_id=caller_id,
-                pyvoip_call=call,  # Pass the actual call object
-                on_transcript=lambda transcript: self._on_transcript(call_id, transcript),
-                on_call_end=lambda: self._on_call_end(call_id)
-            )
-            
-            # Store call handler
-            self.active_calls[call_id] = call_handler
-            
-            # Start call (this will answer it)
-            call_handler.start_call()
-            
-            # Notify application
-            if self.on_incoming_call:
-                self.on_incoming_call(call_id, caller_id)
-            
-            # Start audio handling thread
-            self._start_audio_handler(call, call_handler)
-            
-            sip_logger.info(f"✅ Incoming call {call_id} handled successfully")
-            return call_handler
-            
-        except Exception as e:
-            sip_logger.error(f"❌ Error handling incoming call: {e}")
-            import traceback
-            sip_logger.error(traceback.format_exc())
-            return None
-    
-    def _start_audio_handler(self, call: VoIPCall, call_handler: CallHandler):
-        """Handle audio for the call"""
-        def handle_audio():
-            try:
-                while call.state == CallState.ANSWERED:
-                    # Read audio from the call
-                    audio = call.read_audio()
-                    if audio:
-                        call_handler.add_audio_chunk(audio)
-                    time.sleep(0.02)  # 20ms chunks
-            except Exception as e:
-                sip_logger.error(f"❌ Audio handler error: {e}")
-        
-        audio_thread = threading.Thread(target=handle_audio, daemon=True)
-        audio_thread.start()
     
     def _on_transcript(self, call_id: str, transcript: str):
         """Handle transcript from speech recognition"""
